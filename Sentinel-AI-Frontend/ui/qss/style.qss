@@ -1,0 +1,222 @@
+/* ==================== MODERN LOGIN/SIGNUP STYLESHEET ==================== */
+/* Design: Glassmorphism + Modern AI Assistant Aesthetic */
+
+QWidget {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #0f0f1a, stop:0.5 #1a1a2e, stop:1 #16162a);
+    font-family: 'Inter', 'Segoe UI', 'San Francisco', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #ffffff;
+    font-size: 15px;
+}
+
+/* Title Label */
+#titleLabel {
+    font-size: 36px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 25px;
+    letter-spacing: -0.5px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #ffffff, stop:0.5 #a78bfa, stop:1 #4f46e5);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Input Fields - Modern Floating Design */
+QLineEdit {
+    padding: 16px 20px;
+    border: 2px solid rgba(79, 70, 229, 0.2);
+    border-radius: 12px;
+    background: rgba(30, 30, 46, 0.6);
+    backdrop-filter: blur(10px);
+    color: #ffffff;
+    font-size: 15px;
+    selection-background-color: #4f46e5;
+    min-height: 24px;
+}
+
+QLineEdit:hover {
+    border: 2px solid rgba(79, 70, 229, 0.4);
+    background: rgba(37, 37, 58, 0.7);
+}
+
+QLineEdit:focus {
+    border: 2px solid #4f46e5;
+    background: rgba(37, 37, 58, 0.8);
+    box-shadow: 0 0 20px rgba(79, 70, 229, 0.3);
+}
+
+QLineEdit::placeholder {
+    color: #6b7280;
+}
+
+/* Checkbox - Remember Me */
+QCheckBox {
+    color: #d1d5db;
+    font-size: 14px;
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid #4f46e5;
+    background: rgba(30, 30, 46, 0.6);
+}
+
+QCheckBox::indicator:hover {
+    background: rgba(79, 70, 229, 0.2);
+}
+
+QCheckBox::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4f46e5, stop:1 #7c3aed);
+    border: 2px solid #7c3aed;
+    image: url(ui/assests/check_icon.png);
+}
+
+/* Primary Buttons (Login/Signup) */
+QPushButton#loginBtn, QPushButton#signupBtn {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4f46e5, stop:0.5 #7c3aed, stop:1 #9333ea);
+    color: white;
+    padding: 16px 24px;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 16px;
+    min-height: 24px;
+    letter-spacing: 0.3px;
+}
+
+QPushButton#loginBtn:hover, QPushButton#signupBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #5b52f2, stop:0.5 #8b42f4, stop:1 #a855f7);
+    transform: translateY(-2px);
+}
+
+QPushButton#loginBtn:pressed, QPushButton#signupBtn:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4338ca, stop:0.5 #6d28d9, stop:1 #7e22ce);
+}
+
+/* Secondary Button (Switch to other page) */
+QPushButton#loginBtn[secondary="true"],
+QPushButton#signupBtn[secondary="true"] {
+    background: transparent;
+    border: 2px solid rgba(79, 70, 229, 0.3);
+    color: #a78bfa;
+    padding: 14px 24px;
+    font-weight: 500;
+}
+
+QPushButton#loginBtn[secondary="true"]:hover,
+QPushButton#signupBtn[secondary="true"]:hover {
+    background: rgba(79, 70, 229, 0.1);
+    border: 2px solid rgba(79, 70, 229, 0.5);
+    color: #c4b5fd;
+}
+
+/* Forgot Password Link */
+#forgotPassword {
+    font-size: 14px;
+    color: #a78bfa;
+    text-align: right;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+#forgotPassword:hover {
+    color: #c4b5fd;
+    text-decoration: underline;
+}
+
+/* Divider Elements */
+QFrame#line {
+    background-color: rgba(107, 114, 128, 0.3);
+    max-height: 1px;
+}
+
+#orLabel {
+    color: #9ca3af;
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding-left: 15px;
+    padding-right: 15px;
+}
+
+/* Image Container */
+QFrame[objectName="imageBox"] {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 rgba(79, 70, 229, 0.1), stop:1 rgba(124, 58, 237, 0.1));
+    border: 2px solid rgba(79, 70, 229, 0.2);
+    border-radius: 20px;
+}
+
+QLabel[objectName="imageLabel"] {
+    border: none;
+    border-radius: 18px;
+}
+
+/* Message Boxes */
+QMessageBox {
+    background-color: #1e1e2e;
+    color: #ffffff;
+}
+
+QMessageBox QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4f46e5, stop:1 #7c3aed);
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    min-width: 80px;
+}
+
+QMessageBox QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #5b52f2, stop:1 #8b42f4);
+}
+
+/* Scrollbar Styling */
+QScrollBar:vertical {
+    background: rgba(30, 30, 46, 0.4);
+    width: 12px;
+    border-radius: 6px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(79, 70, 229, 0.5);
+    border-radius: 6px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(79, 70, 229, 0.7);
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background: rgba(30, 30, 46, 0.4);
+    height: 12px;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(79, 70, 229, 0.5);
+    border-radius: 6px;
+    min-width: 20px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(79, 70, 229, 0.7);
+}

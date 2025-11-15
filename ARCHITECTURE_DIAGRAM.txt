@@ -1,0 +1,316 @@
+================================================================================
+                     SENTINEL AI - UNIFIED LAUNCHER ARCHITECTURE
+================================================================================
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│                           USER RUNS: python launcher.py                  │
+│                                                                          │
+└────────────────────────────────┬─────────────────────────────────────────┘
+                                 │
+                                 ▼
+         ┌───────────────────────────────────────────────────┐
+         │         launcher.py (Main Orchestrator)           │
+         │                                                   │
+         │  1. Validate directory structure                 │
+         │  2. Setup signal handlers (SIGINT/SIGTERM)       │
+         │  3. Initialize CommunicationBus                  │
+         │  4. Start backend thread (daemon)                │
+         │  5. Enhance frontend (monkey patch)              │
+         │  6. Run frontend on main thread                  │
+         │  7. Monitor both components                      │
+         │  8. Handle graceful shutdown                     │
+         └───────────────┬─────────────────┬─────────────────┘
+                         │                 │
+          ┌──────────────┘                 └──────────────┐
+          ▼                                               ▼
+┌─────────────────────────────┐           ┌─────────────────────────────┐
+│   BACKEND (Child Thread)    │           │  FRONTEND (Main Thread)     │
+│        [Daemon Mode]        │           │      [Qt Requirement]       │
+└─────────────────────────────┘           └─────────────────────────────┘
+          │                                               │
+          │ Started by BackendRunner                      │ Enhanced by FrontendEnhancer
+          ▼                                               ▼
+┌─────────────────────────────┐           ┌─────────────────────────────┐
+│  integration/                │           │  integration/               │
+│  backend_runner.py          │           │  frontend_enhancer.py       │
+│                             │           │                             │
+│  • Import backend modules   │           │  • Import frontend modules  │
+│  • Monkey patch at runtime  │           │  • Patch DashboardPage      │
+│  • Inject comm_bus          │           │  • Inject status widget     │
+│  • Send status updates      │           │  • Setup error handlers     │
+└──────────┬──────────────────┘           └──────────┬──────────────────┘
+           │                                         │
+           │ Patches these modules:                  │ Patches:
+           │ • wake_word_listener                    │ • DashboardPage.__init__()
+           │ • speech_recognizer                     │
+           │ • langgraph_router                      │
+           │                                         │
+           ▼                                         ▼
+┌─────────────────────────────┐           ┌─────────────────────────────┐
+│  Sentinel-AI-Backend/       │           │  Sentinel-AI-Frontend/      │
+│  [UNCHANGED SOURCE CODE]    │           │  [UNCHANGED SOURCE CODE]    │
+│                             │           │                             │
+│  ┌─────────────────────┐   │           │  ┌─────────────────────┐   │
+│  │ main.py             │   │           │  │ main.py             │   │
+│  └─────────────────────┘   │           │  └─────────────────────┘   │
+│  ┌─────────────────────┐   │           │  ┌─────────────────────┐   │
+│  │ src/utils/          │   │           │  │ ui/views/           │   │
+│  │   orchestrator.py   │   │           │  │   login_page.py     │   │
+│  │   wake_word_listene │   │           │  │   signup_page.py    │   │
+│  │   speech_recognizer │   │           │  │   dashboard.py      │   │
+│  │   langgraph_router  │   │           │  └─────────────────────┘   │
+│  └─────────────────────┘   │           │  ┌─────────────────────┐   │
+│  ┌─────────────────────┐   │           │  │ auth/               │   │
+│  │ src/graph/          │   │           │  │   keyring_auth.py   │   │
+│  │   graph_builder.py  │   │           │  │   session_manager.py│   │
+│  │   agent_state.py    │   │           │  └─────────────────────┘   │
+│  │   agent_node.py     │   │           │  ┌─────────────────────┐   │
+│  └─────────────────────┘   │           │  │ services/           │   │
+│  ┌─────────────────────┐   │           │  │   service_manager.py│   │
+│  │ src/tools/          │   │           │  │   meet_service.py   │   │
+│  │   browser_tools.py  │   │           │  └─────────────────────┘   │
+│  │   music_tools.py    │   │           │  ┌─────────────────────┐   │
+│  └─────────────────────┘   │           │  │ + INJECTED:         │   │
+│                             │           │  │ BackendStatusWidget │   │
+│  Execution Flow:            │           │  │ (from integration/) │   │
+│  1. Validate TAVILY_API_KEY │           │  └─────────────────────┘   │
+│  2. Listen for "Sentinel"   │           │                             │
+│  3. Capture voice command   │           │  UI Flow:                   │
+│  4. Route to LangGraph      │           │  1. Show login page         │
+│  5. Execute agent tools     │           │  2. Authenticate user       │
+│  6. Return response         │           │  3. Show dashboard          │
+│  7. Repeat                  │           │  4. Display services        │
+│                             │           │  5. Show backend status     │
+└──────────┬──────────────────┘           └──────────┬──────────────────┘
+           │                                         │
+           │ Sends messages                          │ Receives messages
+           ▼                                         ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                   integration/communication.py                          │
+│                      CommunicationBus (Singleton)                       │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐ │
+│  │                       Thread-Safe Queues                         │ │
+│  │                                                                  │ │
+│  │  frontend_queue ◄──────────┬──────────► backend_queue           │ │
+│  │  (Backend → Frontend)       │            (Frontend → Backend)    │ │
+│  │                             │                                    │ │
+│  │  Messages:                  │            Messages:               │ │
+│  │  • STATUS_UPDATE            │            • SHUTDOWN_REQUEST      │ │
+│  │  • WAKE_WORD_DETECTED       │                                    │ │
+│  │  • COMMAND_RECEIVED         │                                    │ │
+│  │  • RESPONSE_GENERATED       │                                    │ │
+│  │  • ERROR                    │                                    │ │
+│  └──────────────────────────────────────────────────────────────────┘ │
+│                                                                         │
+│  Message Structure:                                                    │
+│  ┌────────────────────────────────────────────────────────────┐       │
+│  │ Message(                                                   │       │
+│  │   type: MessageType,                                       │       │
+│  │   status: BackendStatus,                                   │       │
+│  │   data: Any,                                               │       │
+│  │   error: str,                                              │       │
+│  │   timestamp: datetime                                      │       │
+│  │ )                                                          │       │
+│  └────────────────────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────────────────────┘
+           ▲                                         │
+           │                                         │ Polled every 100ms
+           │                                         ▼
+           │                              ┌──────────────────────────┐
+           │                              │ integration/             │
+           │                              │ status_widget.py         │
+           │                              │                          │
+           │                              │ BackendStatusWidget:     │
+           │                              │ • Color-coded indicator  │
+           │                              │ • Activity log           │
+           │                              │ • Timer-based polling    │
+           │                              │ • Error notifications    │
+           │                              └──────────────────────────┘
+           │
+           │ Status Updates:
+           │
+           ├─ STARTING (🟠 Orange)
+           ├─ READY (🟢 Green)
+           ├─ LISTENING (🟢 Green)
+           ├─ PROCESSING (🟡 Yellow)
+           ├─ ERROR (🔴 Red)
+           └─ STOPPED (⚫ Gray)
+
+
+================================================================================
+                              MESSAGE FLOW EXAMPLE
+================================================================================
+
+Timeline: User says "Sentinel" → Command processed → Response generated
+
+[T+0ms]   Backend: Wake word listener detects "Sentinel"
+             ↓
+[T+10ms]  Backend: Create Message(WAKE_WORD_DETECTED)
+             ↓
+[T+15ms]  Backend: comm_bus.send_to_frontend(message)
+             ↓
+[T+20ms]  Queue: Message added to frontend_queue
+             ↓
+[T+100ms] Frontend: Timer fires, calls check_messages()
+             ↓
+[T+105ms] Frontend: Retrieves message from queue
+             ↓
+[T+110ms] Frontend: status_widget.handle_message()
+             ↓
+[T+115ms] Frontend: Update UI - Indicator turns green
+             ↓
+[T+120ms] Frontend: Activity log shows "Wake word detected!"
+
+[T+2s]    Backend: Speech recognizer captures "play music"
+             ↓
+[T+2.01s] Backend: Create Message(COMMAND_RECEIVED, data="play music")
+             ↓
+[T+2.05s] Frontend: (Timer) Receives and displays command
+
+[T+4s]    Backend: LangGraph processes command
+             ↓
+[T+6s]    Backend: Response generated "Playing music on Spotify"
+             ↓
+[T+6.01s] Backend: Create Message(RESPONSE_GENERATED, data="Playing...")
+             ↓
+[T+6.1s]  Frontend: (Timer) Receives and displays response
+
+
+================================================================================
+                             SHUTDOWN SEQUENCE
+================================================================================
+
+User closes window → Graceful shutdown of both components
+
+[Action]  User clicks X on window
+             ↓
+[Event]   QMainWindow.closeEvent() fires
+             ↓
+[Hook]    Enhanced closeEvent calls launcher.shutdown()
+             ↓
+[Launcher] Sets shutting_down = True
+             ↓
+[Launcher] Calls backend_runner.stop()
+             ↓
+[Backend]  Sets running = False
+             ↓
+[Backend]  Sends Message(STATUS_UPDATE, status=STOPPED)
+             ↓
+[Backend]  Orchestrator loop detects stop flag
+             ↓
+[Backend]  Cleanup: Porcupine, speech recognizer
+             ↓
+[Backend]  Thread exits
+             ↓
+[Launcher] backend_runner.join(timeout=5)
+             ↓
+[Launcher] comm_bus.clear()
+             ↓
+[Launcher] Print "Shutdown complete"
+             ↓
+[Frontend] QApplication.exec_() returns
+             ↓
+[Exit]     sys.exit(exit_code)
+
+
+================================================================================
+                           FILE DEPENDENCY GRAPH
+================================================================================
+
+launcher.py
+    ├── imports: integration.backend_runner
+    │              ├── imports: integration.communication
+    │              └── patches: Sentinel-AI-Backend/src/utils/*
+    │
+    ├── imports: integration.frontend_enhancer
+    │              ├── imports: integration.status_widget
+    │              │              └── imports: integration.communication
+    │              └── patches: Sentinel-AI-Frontend/ui/views/dashboard.py
+    │
+    ├── imports: Sentinel-AI-Backend/main
+    │              └── imports: Sentinel-AI-Backend/src/**
+    │
+    └── imports: Sentinel-AI-Frontend/main
+                   └── imports: Sentinel-AI-Frontend/**
+
+
+================================================================================
+                             MONKEY PATCHING FLOW
+================================================================================
+
+Backend Patching (runtime, no source modification):
+
+Original Code (Sentinel-AI-Backend/src/utils/wake_word_listener.py):
+    class WakeWordListener:
+        def wait_for_wake_word(self):
+            # Original implementation
+            return detected
+
+Patched at Runtime (integration/backend_runner.py):
+    original_wait = WakeWordListener.wait_for_wake_word
+
+    def patched_wait(self):
+        # BEFORE: Send status update
+        self.comm_bus.send_to_frontend(
+            Message(MessageType.STATUS_UPDATE, status=BackendStatus.LISTENING)
+        )
+
+        # EXECUTE: Call original
+        result = original_wait(self)
+
+        # AFTER: Send event
+        if result:
+            self.comm_bus.send_to_frontend(
+                Message(MessageType.WAKE_WORD_DETECTED)
+            )
+
+        return result
+
+    # Apply patch (no source file changed!)
+    WakeWordListener.comm_bus = comm_bus
+    WakeWordListener.wait_for_wake_word = patched_wait
+
+Result: Backend code unchanged, but behavior enhanced at runtime
+
+
+================================================================================
+                               KEY BENEFITS
+================================================================================
+
+✓ Single Command Launch        python launcher.py runs everything
+✓ Zero Code Modification        Original code completely unchanged
+✓ Proper Thread Management      PyQt5 on main thread (required)
+✓ Real-Time Status Display      Backend status in frontend dashboard
+✓ Graceful Shutdown             Clean exit when either component stops
+✓ Thread-Safe Communication     Queue-based messaging, no race conditions
+✓ Error Handling                Backend errors shown in frontend
+✓ Backward Compatible           Components still work standalone
+✓ Production Ready              Signal handling, cleanup, monitoring
+✓ Extensible                    Easy to add new messages/features
+
+
+================================================================================
+                             QUICK COMMAND REFERENCE
+================================================================================
+
+Setup:
+  python setup_launcher.py                # Install all dependencies
+
+Run:
+  python launcher.py                      # Run integrated system
+
+Standalone:
+  cd Sentinel-AI-Backend && python main.py    # Backend only
+  cd Sentinel-AI-Frontend && python main.py   # Frontend only
+
+Documentation:
+  QUICKSTART.md                           # User guide (3 steps)
+  LAUNCHER_README.md                      # Technical details
+  INTEGRATION_SUMMARY.md                  # Implementation overview
+  CLAUDE.md                               # Architecture & patterns
+  integration/README.md                   # Integration layer docs
+
+
+================================================================================

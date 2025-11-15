@@ -1,0 +1,21 @@
+# Sentinel AI Unified Launcher - Root Requirements
+#
+# This file intentionally left empty!
+#
+# The launcher itself has ZERO external dependencies.
+# It uses only Python's standard library.
+#
+# Dependencies are managed separately in each component:
+# - Sentinel-AI-Backend/requirements.txt (294 packages for ML/AI backend)
+# - Sentinel-AI-Frontend/requirements.txt (11 packages for PyQt5 frontend)
+#
+# To install component dependencies:
+#   cd Sentinel-AI-Backend && pip install -r requirements.txt
+#   cd Sentinel-AI-Frontend && pip install -r requirements.txt
+#
+# Or use the automated installer:
+#   python setup_launcher.py
+#
+# But if your backend and frontend already work individually,
+# you don't need to install anything new - just run:
+#   python launcher.py

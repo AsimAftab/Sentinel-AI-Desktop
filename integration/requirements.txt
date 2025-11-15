@@ -1,0 +1,20 @@
+# Integration Layer Dependencies
+#
+# This file intentionally left empty!
+#
+# The integration layer uses ONLY Python standard library:
+# - threading (built-in)
+# - queue (built-in)
+# - sys (built-in)
+# - os (built-in)
+# - pathlib (built-in)
+# - signal (built-in)
+# - atexit (built-in)
+# - dataclasses (built-in, Python 3.7+)
+# - enum (built-in)
+# - datetime (built-in)
+#
+# NO EXTERNAL PACKAGES REQUIRED FOR THE LAUNCHER!
+#
+# The launcher simply orchestrates your existing backend and frontend,
+# which already have their own dependencies installed.
