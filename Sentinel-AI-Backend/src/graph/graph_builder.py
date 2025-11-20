@@ -144,6 +144,7 @@ from src.graph.agent_state import AgentState
 from src.tools.browser_tools import browser_tools
 from src.tools.music_tools import music_tools
 from src.tools.playwright_music_tools import playwright_music_tools
+from src.tools.meeting_tools import meeting_tools
 from IPython.display import Image, display
 
 
@@ -175,6 +176,8 @@ music_agent_tools = priority_music_tools + playwright_music_tools + [
     tool for tool in music_tools if tool not in priority_music_tools
 ]
 
+meeting_agent_tools = meeting_tools
+
 # --- Supervisor Chain definition (No changes needed here) ---
 supervisor_prompt_str = """You are a supervisor in a multi-agent AI system. Your role is to oversee a team of specialized agents and route user requests.
 Based on the last user message, you must select the next agent to act from the available list or decide if the task is complete.
@@ -182,10 +185,11 @@ Based on the last user message, you must select the next agent to act from the a
 Available agents:
 - `Browser`: For tasks requiring internet access, web search, weather info, news, translation, currency conversion, word definitions, website status checks, and file downloads.
 - `Music`: For music-related tasks including playing songs on Spotify/YouTube/YouTube Music (with auto-play), controlling playback, searching lyrics, creating playlists, mood-based music, genre playlists, and music discovery.
+- `Meeting`: For Google Meet and Calendar tasks including creating instant meetings, scheduling meetings, listing upcoming meetings, joining meetings, and cancelling meetings.
 - `FINISH`: If the user's question has been fully answered and the task is complete.
 
 Analyze the conversation and output *only* the name of the next agent to act.
-Your response MUST BE exactly one word: `Browser`, `Music`, or `FINISH`.
+Your response MUST BE exactly one word: `Browser`, `Music`, `Meeting`, or `FINISH`.
 """
 supervisor_prompt = ChatPromptTemplate.from_messages(
     [
@@ -253,14 +257,17 @@ Always prefer tools that use the user's existing browser over creating new insta
 
 music_agent_node = create_agent_node(llm, music_agent_tools, "Music", custom_prompt=music_agent_prompt)
 
+# Meeting agent for Google Meet and Calendar
+meeting_agent_node = create_agent_node(llm, meeting_agent_tools, "Meeting")
+
 def supervisor_node(state: AgentState) -> dict:
     """Invokes the supervisor chain and formats the output for the graph."""
     result = supervisor_chain.invoke(state).strip()
-    
-    if not result or not result in ["Browser", "Music", "FINISH"]:
+
+    if not result or not result in ["Browser", "Music", "Meeting", "FINISH"]:
         print(f"--- SUPERVISOR: (invalid output '{result}', defaulting to FINISH) ---")
         return {"messages": ["FINISH"]}
-    
+
     print(f"--- SUPERVISOR: (decided next step is {result}) ---")
     return {"messages": [result]}
 
@@ -268,6 +275,7 @@ workflow = StateGraph(AgentState)
 workflow.add_node("supervisor", supervisor_node)
 workflow.add_node("Browser", browser_agent_node)
 workflow.add_node("Music", music_agent_node)
+workflow.add_node("Meeting", meeting_agent_node)
 
 def router(state):
     """Routes to the correct agent based on the supervisor's decision."""
@@ -276,12 +284,15 @@ def router(state):
         return "Browser"
     elif "Music" in next_agent:
         return "Music"
+    elif "Meeting" in next_agent:
+        return "Meeting"
     else:
         return END
 
-workflow.add_conditional_edges("supervisor", router, {"Browser": "Browser", "Music": "Music", "__end__": END})
+workflow.add_conditional_edges("supervisor", router, {"Browser": "Browser", "Music": "Music", "Meeting": "Meeting", "__end__": END})
 workflow.add_edge("Browser", END)
 workflow.add_edge("Music", END)
+workflow.add_edge("Meeting", END)
 workflow.set_entry_point("supervisor")
 
 graph = workflow.compile()

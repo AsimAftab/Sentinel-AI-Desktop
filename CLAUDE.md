@@ -89,21 +89,23 @@ Thread-safe singleton managing bidirectional message queues:
 
 **Multi-Agent System** (`src/graph/graph_builder.py`):
 - **LLM**: Azure OpenAI GPT (configured via environment variables)
-- **Supervisor Agent**: Routes tasks to specialized agents (Browser, Music, or FINISH)
-- **Browser Agent**: Uses `browser_tools` for web search/scraping (Tavily search, Selenium)
-- **Music Agent**: Uses `music_tools` for Spotify integration (search, play, control playback)
+- **Supervisor Agent**: Routes tasks to specialized agents (Browser, Music, Meeting, or FINISH)
+- **Browser Agent**: Uses `browser_tools` for web search/scraping (Tavily search, weather, news, translation)
+- **Music Agent**: Uses `music_tools` + `playwright_music_tools` for Spotify/YouTube (auto-play, lyrics, genres)
+- **Meeting Agent**: Uses `meeting_tools` for Google Meet and Calendar (create, schedule, list, join, cancel meetings)
 - **Graph Framework**: LangGraph with ReAct agents using `langgraph.prebuilt.create_react_agent`
 
 **Key Files**:
 - `src/utils/wake_word_listener.py` - Porcupine wake word detection
 - `src/utils/speech_recognizer.py` - Google Speech Recognition wrapper
-- `src/utils/text_to_speech.py` - ElevenLabs TTS integration (NEW!)
+- `src/utils/text_to_speech.py` - ElevenLabs TTS integration
 - `src/utils/langgraph_router.py` - Routes commands to LangGraph
-- `src/graph/graph_builder.py` - Multi-agent graph definition
+- `src/graph/graph_builder.py` - Multi-agent graph definition (3 agents)
 - `src/graph/agent_state.py` - Shared state structure for agents
-- `src/tools/browser_tools.py` - Enhanced web tools (search, weather, news, translation, etc.)
-- `src/tools/music_tools.py` - Enhanced Spotify/YouTube tools (lyrics, genres, moods)
-- `src/tools/playwright_music_tools.py` - Playwright-based auto-play music tools (NEW!)
+- `src/tools/browser_tools.py` - Enhanced web tools (14 tools: search, weather, news, translation, etc.)
+- `src/tools/music_tools.py` - Enhanced Spotify/YouTube tools (25 tools: lyrics, genres, moods)
+- `src/tools/playwright_music_tools.py` - Playwright-based auto-play music tools (6 tools)
+- `src/tools/meeting_tools.py` - Google Meet and Calendar integration (6 tools) (NEW!)
 
 ### Frontend Architecture (Sentinel-AI-Frontend/)
 

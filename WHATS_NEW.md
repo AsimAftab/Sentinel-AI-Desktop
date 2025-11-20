@@ -2,7 +2,49 @@
 
 ## Major Features Added
 
-### 🔊 1. ElevenLabs Text-to-Speech
+### 💬 1. Conversation Continuation Mode (NEWEST!)
+**Multi-turn conversations without repeating "Sentinel"!**
+
+- Continue conversations naturally when agent asks questions
+- Automatic follow-up detection
+- No need to say wake word for each response
+- Smart timeout (10 seconds)
+- Exit anytime with "cancel"
+- Up to 5 conversation turns
+
+**Example:**
+```
+You: "Sentinel, create a meeting"
+Agent: "What should it be about?"
+[Automatically listening...]
+You: "Team standup at 2 PM"
+Agent: "Meeting scheduled!"
+```
+
+See: `CONVERSATION_MODE.md`
+
+---
+
+### 📅 2. Google Meet & Calendar Integration
+**Create and manage meetings with voice!**
+
+- Create instant Google Meet meetings
+- Schedule future meetings with date/time
+- List upcoming meetings from calendar
+- Join meetings automatically
+- Send calendar invites to attendees
+- Cancel meetings
+
+**Voice commands:**
+- "Sentinel, create a quick meeting"
+- "Sentinel, schedule a meeting tomorrow at 2 PM"
+- "Sentinel, show my upcoming meetings"
+
+See: `GOOGLE_MEET_SETUP.md`
+
+---
+
+### 🔊 2. ElevenLabs Text-to-Speech
 **Sentinel now SPEAKS!**
 
 - Natural AI voices (Sarah, Rachel, Antoni, Adam, etc.)
@@ -73,7 +115,8 @@ See: `TTS_QUICKSTART.md`
 |-------|----------|-----|-------|
 | **Browser** | 6 | 8 | 14 |
 | **Music** | 20 | 11 | 31 |
-| **TOTAL** | 26 | 19 | **45 tools** |
+| **Meeting** | 0 | 6 | 6 |
+| **TOTAL** | 26 | 25 | **51 tools** |
 
 ---
 
@@ -301,11 +344,13 @@ Listen: 🔊 Sentinel speaks!
 ## Changelog
 
 **v2.0 (2025-11-21)**
+- ✅ Added conversation continuation mode (multi-turn)
+- ✅ Added Google Meet & Calendar integration (6 tools)
 - ✅ Added ElevenLabs text-to-speech
-- ✅ Added Playwright music auto-play
+- ✅ Added Playwright music auto-play (6 tools)
 - ✅ Added 8 browser utility tools
 - ✅ Added 5 music discovery tools
-- ✅ Total: 19 new tools + voice integration
+- ✅ Total: 51 tools + voice + conversations
 
 **v1.0 (Previous)**
 - Initial release with basic voice assistant
