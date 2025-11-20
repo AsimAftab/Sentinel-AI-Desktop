@@ -160,8 +160,20 @@ llm = AzureChatOpenAI(
 )
 
 browser_agent_tools = browser_tools
-# Combine standard music tools with Playwright automation tools
-music_agent_tools = music_tools + playwright_music_tools
+# Prioritize existing-browser tools first, then Playwright, then other tools
+# This ensures the agent uses the user's existing browser when possible
+from src.tools.music_tools import auto_play_youtube_song, play_music_smart
+
+# Reorder to prioritize existing browser usage
+priority_music_tools = [
+    auto_play_youtube_song,  # FIRST - uses existing browser
+    play_music_smart,        # SECOND - smart fallback
+]
+
+# Then add Playwright tools for when we need full automation
+music_agent_tools = priority_music_tools + playwright_music_tools + [
+    tool for tool in music_tools if tool not in priority_music_tools
+]
 
 # --- Supervisor Chain definition (No changes needed here) ---
 supervisor_prompt_str = """You are a supervisor in a multi-agent AI system. Your role is to oversee a team of specialized agents and route user requests.
@@ -184,13 +196,18 @@ supervisor_prompt = ChatPromptTemplate.from_messages(
 supervisor_chain = supervisor_prompt | llm | StrOutputParser()
 
 # --- Agent and Graph definitions ---
-def create_agent_node(llm, tools, agent_name: str):
+def create_agent_node(llm, tools, agent_name: str, custom_prompt: str = None):
     """Creates a node for a ReAct agent using LangGraph prebuilt agent."""
     # Create a react agent graph for this specific agent
+    if custom_prompt:
+        agent_prompt = custom_prompt
+    else:
+        agent_prompt = f"You are the {agent_name} agent. Use the available tools to help the user."
+
     agent_graph = create_react_agent(
         llm,
         tools,
-        prompt=f"You are the {agent_name} agent. Use the available tools to help the user."
+        prompt=agent_prompt
     )
 
     def agent_node(state: AgentState):
@@ -217,7 +234,24 @@ def create_agent_node(llm, tools, agent_name: str):
     return agent_node
 
 browser_agent_node = create_agent_node(llm, browser_agent_tools, "Browser")
-music_agent_node = create_agent_node(llm, music_agent_tools, "Music")
+
+# Music agent with custom prompt emphasizing auto-play tools
+music_agent_prompt = """You are the Music agent. Your job is to help users play music and manage playback.
+
+IMPORTANT: For YouTube music playback, PRIORITIZE these tools in order:
+1. BEST: auto_play_youtube_song - Uses existing browser, finds direct video link, auto-plays
+2. Alternative: playwright_play_youtube - Opens new browser window with automation
+3. AVOID: play_on_youtube (deprecated - only opens search page)
+
+For YouTube Music specifically:
+1. BEST: auto_play_youtube_song - Works great for YT Music too
+2. Alternative: playwright_play_youtube_music - New browser automation
+
+For Spotify: use search_and_play_song
+
+Always prefer tools that use the user's existing browser over creating new instances."""
+
+music_agent_node = create_agent_node(llm, music_agent_tools, "Music", custom_prompt=music_agent_prompt)
 
 def supervisor_node(state: AgentState) -> dict:
     """Invokes the supervisor chain and formats the output for the graph."""

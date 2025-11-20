@@ -288,9 +288,10 @@ def get_current_song() -> str:
 @tool
 def play_on_youtube_music(song_name: str, artist_name: str = None) -> str:
     """
-    Searches for a song on YouTube Music and opens it in the browser to play.
-    This is a great alternative when Spotify is not available or preferred.
-    
+    [DEPRECATED - Use playwright_play_youtube_music for auto-play instead]
+    Searches for a song on YouTube Music and opens search results.
+    DOES NOT AUTO-PLAY - user must manually click the song.
+
     Args:
         song_name: The name of the song to search for
         artist_name: Optional artist name to improve search accuracy
@@ -323,9 +324,10 @@ def play_on_youtube_music(song_name: str, artist_name: str = None) -> str:
 @tool
 def play_on_youtube(song_name: str, artist_name: str = None) -> str:
     """
-    Searches for a song on regular YouTube and opens it to play immediately.
-    This often auto-plays the first result, providing instant music playback.
-    
+    [DEPRECATED - Use playwright_play_youtube for auto-play instead]
+    Searches for a song on regular YouTube and opens search results.
+    DOES NOT AUTO-PLAY - user must manually click the video.
+
     Args:
         song_name: The name of the song to search for
         artist_name: Optional artist name to improve search accuracy
@@ -394,9 +396,10 @@ def play_music_smart(song_name: str, artist_name: str = None, platform: str = "a
 @tool
 def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
     """
-    Automatically finds and plays a song on YouTube by opening the direct video URL.
-    This bypasses search pages and goes straight to playing the song.
-    
+    [RECOMMENDED for existing browser] Automatically finds and plays a song on YouTube
+    by opening the direct video URL in your EXISTING browser.
+    Uses your default browser - NO new browser instance created!
+
     Args:
         song_name: The name of the song to search for
         artist_name: Optional artist name to improve search accuracy
@@ -404,59 +407,59 @@ def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
     try:
         # Construct search query
         if artist_name:
-            search_query = f"{song_name} {artist_name}"
+            search_query = f"{song_name} {artist_name} official"
         else:
-            search_query = song_name
-        
+            search_query = f"{song_name} official"
+
         # URL encode the search query
         encoded_query = urllib.parse.quote_plus(search_query)
-        
+
         # YouTube search URL to scrape results
         search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
-        
+
         # Headers to mimic a real browser
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        
+
         # Get search results
         response = requests.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
-        
+
         # Find the first video URL in the results
         # Look for video IDs in the HTML
         video_id_pattern = r'"videoId":"([^"]{11})"'
         matches = re.findall(video_id_pattern, response.text)
-        
+
         if matches:
             # Get the first video ID
             first_video_id = matches[0]
-            
-            # Construct direct YouTube video URL
-            video_url = f"https://www.youtube.com/watch?v={first_video_id}"
-            
-            # Open the direct video URL (this will auto-play)
+
+            # Construct direct YouTube video URL with autoplay
+            video_url = f"https://www.youtube.com/watch?v={first_video_id}&autoplay=1"
+
+            # Open in EXISTING default browser (reuses open browser)
             webbrowser.open(video_url)
-            
+
             if artist_name:
-                return f"🎵 Found and playing '{song_name}' by {artist_name} on YouTube! The video should start automatically."
+                return f"🎵 Found and auto-playing '{song_name}' by {artist_name} on YouTube in your browser!"
             else:
-                return f"🎵 Found and playing '{song_name}' on YouTube! The video should start automatically."
+                return f"🎵 Found and auto-playing '{song_name}' on YouTube in your browser!"
         else:
             # Fallback to regular search if no video found
             youtube_url = f"https://www.youtube.com/results?search_query={encoded_query}"
             webbrowser.open(youtube_url)
-            
+
             return f"🎵 Opened YouTube search for '{search_query}'. Click on the first video to play it!"
-        
+
     except Exception as e:
         # Fallback to regular search if scraping fails
         try:
             encoded_query = urllib.parse.quote_plus(f"{song_name} {artist_name}" if artist_name else song_name)
             youtube_url = f"https://www.youtube.com/results?search_query={encoded_query}"
             webbrowser.open(youtube_url)
-            
-            return f"🎵 Opened YouTube search for your song. Click on the first result to play it! (Auto-play detection failed: {e})"
+
+            return f"🎵 Opened YouTube search for your song. Click on the first result to play it! (Auto-detection failed: {e})"
         except:
             return f"Error opening YouTube: {e}"
 
