@@ -2,6 +2,7 @@
 from src.utils.speech_recognizer import SpeechRecognitionAgent
 from src.utils.wake_word_listener import WakeWordListener
 from src.utils.langgraph_router import route_to_langgraph
+from src.utils.text_to_speech import get_tts_instance
 from dotenv import load_dotenv
 import os
 import sys # Import the sys module
@@ -13,6 +14,7 @@ def run_sentinel_agent():
 
     wake_listener = WakeWordListener(keyword_path=keyword_path, access_key=access_key)
     recognizer = SpeechRecognitionAgent()
+    tts = get_tts_instance()  # Initialize text-to-speech
 
     wake_listener.start()
     print("🟢 Waiting for wake word... (Press Ctrl+C to exit)")
@@ -27,6 +29,10 @@ def run_sentinel_agent():
                 print(f"🧠 Recognized: {command}")
                 response = route_to_langgraph(command)
                 print(f"🤖 LangGraph response: {response}")
+
+                # Speak the response using ElevenLabs TTS
+                if response:
+                    tts.speak(response, blocking=True)
             else:
                 print("⚠️ No command detected.")
     except KeyboardInterrupt:

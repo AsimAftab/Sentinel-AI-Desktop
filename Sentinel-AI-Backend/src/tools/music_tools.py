@@ -598,6 +598,285 @@ def create_youtube_music_station(artist_or_song: str) -> str:
         return f"Error creating YouTube Music station: {e}"
 
 
+@tool
+def search_song_lyrics(song_name: str, artist_name: str = None) -> str:
+    """
+    Searches for and returns song lyrics using Genius API.
+
+    Args:
+        song_name: Name of the song
+        artist_name: Optional artist name for better accuracy
+    """
+    try:
+        import lyricsgenius
+        import os
+
+        # Get Genius API token from environment
+        # Note: User needs to set GENIUS_API_TOKEN in .env file
+        # Get free token at: https://genius.com/api-clients
+        genius_token = os.getenv('GENIUS_API_TOKEN')
+
+        if not genius_token:
+            # Fallback to web scraping approach
+            return search_lyrics_web(song_name, artist_name)
+
+        genius = lyricsgenius.Genius(genius_token)
+        genius.verbose = False
+        genius.remove_section_headers = True
+
+        # Search for the song
+        if artist_name:
+            song = genius.search_song(song_name, artist_name)
+        else:
+            song = genius.search_song(song_name)
+
+        if song:
+            result = f"🎵 **{song.title}** by {song.artist}\n\n"
+            result += f"📝 **Lyrics:**\n\n{song.lyrics[:1500]}"  # Truncate if too long
+
+            if len(song.lyrics) > 1500:
+                result += "\n\n... [Lyrics truncated. Full lyrics available at Genius.com]"
+
+            return result
+        else:
+            return f"Could not find lyrics for '{song_name}'" + (f" by {artist_name}" if artist_name else "")
+
+    except Exception as e:
+        return f"Error searching for lyrics: {e}. You may need to set GENIUS_API_TOKEN in your .env file. Get a free token at https://genius.com/api-clients"
+
+
+@tool
+def search_lyrics_web(song_name: str, artist_name: str = None) -> str:
+    """
+    Searches for song lyrics using web scraping (no API key required).
+
+    Args:
+        song_name: Name of the song
+        artist_name: Optional artist name for better accuracy
+    """
+    try:
+        # Construct search query for Genius
+        if artist_name:
+            search_query = f"{song_name} {artist_name} lyrics genius"
+        else:
+            search_query = f"{song_name} lyrics genius"
+
+        encoded_query = urllib.parse.quote_plus(search_query)
+
+        # Search on Google to find Genius lyrics page
+        search_url = f"https://www.google.com/search?q={encoded_query}"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        response = requests.get(search_url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Find Genius URL from search results
+        genius_link = None
+        for link in soup.find_all('a'):
+            href = link.get('href', '')
+            if 'genius.com' in href and '/lyrics' not in href:
+                # Extract actual URL from Google's redirect
+                if 'url?q=' in href:
+                    genius_link = href.split('url?q=')[1].split('&')[0]
+                    genius_link = urllib.parse.unquote(genius_link)
+                    break
+
+        if genius_link:
+            # Open the Genius page in browser for user to view
+            webbrowser.open(genius_link)
+
+            if artist_name:
+                return f"🎵 Found lyrics for '{song_name}' by {artist_name}! Opening Genius.com in your browser where you can view the full lyrics."
+            else:
+                return f"🎵 Found lyrics for '{song_name}'! Opening Genius.com in your browser where you can view the full lyrics."
+        else:
+            # Fallback to direct Genius search
+            if artist_name:
+                search_url = f"https://genius.com/search?q={urllib.parse.quote_plus(song_name + ' ' + artist_name)}"
+            else:
+                search_url = f"https://genius.com/search?q={urllib.parse.quote_plus(song_name)}"
+
+            webbrowser.open(search_url)
+            return f"🎵 Opening Genius.com search for '{song_name}'. Click on the correct song to view lyrics!"
+
+    except Exception as e:
+        return f"Error searching for lyrics: {e}"
+
+
+@tool
+def play_genre_playlist(genre: str, platform: str = "youtube_music") -> str:
+    """
+    Plays a playlist of a specific music genre.
+
+    Args:
+        genre: Music genre (e.g., "jazz", "rock", "classical", "pop", "hip hop", "electronic")
+        platform: Platform to use ("youtube_music", "youtube", or "spotify")
+    """
+    try:
+        if platform == "spotify" and sp:
+            # Search for genre playlist on Spotify
+            results = sp.search(q=f"{genre}", type='playlist', limit=1)
+            playlists = results['playlists']['items']
+
+            if playlists:
+                playlist_uri = playlists[0]['uri']
+                playlist_name = playlists[0]['name']
+
+                # Check for active devices
+                devices = sp.devices()
+                if not devices or not devices['devices']:
+                    return "No active Spotify device found. Please open Spotify on one of your devices."
+
+                active_device_id = None
+                for device in devices['devices']:
+                    if device['is_active']:
+                        active_device_id = device['id']
+                        break
+
+                if not active_device_id:
+                    active_device_id = devices['devices'][0]['id']
+
+                sp.start_playback(device_id=active_device_id, context_uri=playlist_uri)
+                return f"🎵 Playing {genre} playlist: '{playlist_name}' on Spotify!"
+            else:
+                return f"Could not find a {genre} playlist on Spotify."
+
+        elif platform == "youtube_music":
+            # Open YouTube Music with genre search
+            encoded_genre = urllib.parse.quote_plus(f"{genre} music playlist")
+            url = f"https://music.youtube.com/search?q={encoded_genre}"
+            webbrowser.open(url)
+            return f"🎵 Opened YouTube Music with {genre} playlists. Click on a playlist to start listening!"
+
+        else:  # youtube
+            # Open YouTube with genre playlist
+            encoded_genre = urllib.parse.quote_plus(f"{genre} music playlist")
+            url = f"https://www.youtube.com/results?search_query={encoded_genre}"
+            webbrowser.open(url)
+            return f"🎵 Opened YouTube with {genre} playlists. Click on a playlist to start listening!"
+
+    except Exception as e:
+        return f"Error playing genre playlist: {e}"
+
+
+@tool
+def play_mood_music(mood: str) -> str:
+    """
+    Plays music that matches a specific mood or activity.
+
+    Args:
+        mood: Mood or activity (e.g., "relaxing", "workout", "focus", "party", "sleep", "study")
+    """
+    try:
+        # Map moods to search queries
+        mood_queries = {
+            "relaxing": "relaxing chill music",
+            "workout": "workout gym motivation music",
+            "focus": "focus concentration study music",
+            "party": "party dance music",
+            "sleep": "sleep ambient music",
+            "study": "study focus lofi music",
+            "happy": "happy upbeat music",
+            "sad": "sad emotional music",
+            "romantic": "romantic love songs",
+            "energetic": "energetic upbeat music"
+        }
+
+        search_query = mood_queries.get(mood.lower(), f"{mood} music")
+
+        # Try Spotify first if available
+        if sp:
+            try:
+                results = sp.search(q=search_query, type='playlist', limit=1)
+                playlists = results['playlists']['items']
+
+                if playlists:
+                    playlist_uri = playlists[0]['uri']
+                    playlist_name = playlists[0]['name']
+
+                    devices = sp.devices()
+                    if devices and devices['devices']:
+                        active_device_id = None
+                        for device in devices['devices']:
+                            if device['is_active']:
+                                active_device_id = device['id']
+                                break
+
+                        if not active_device_id:
+                            active_device_id = devices['devices'][0]['id']
+
+                        sp.start_playback(device_id=active_device_id, context_uri=playlist_uri)
+                        return f"🎵 Playing {mood} music: '{playlist_name}' on Spotify!"
+            except:
+                pass
+
+        # Fallback to YouTube Music
+        encoded_query = urllib.parse.quote_plus(search_query + " playlist")
+        url = f"https://music.youtube.com/search?q={encoded_query}"
+        webbrowser.open(url)
+        return f"🎵 Opened YouTube Music with {mood} music playlists. Click on a playlist to start listening!"
+
+    except Exception as e:
+        return f"Error playing mood music: {e}"
+
+
+@tool
+def discover_new_music(based_on: str = None) -> str:
+    """
+    Discovers new music recommendations.
+
+    Args:
+        based_on: Optional artist or genre to base recommendations on
+    """
+    try:
+        if sp:
+            try:
+                if based_on:
+                    # Search for the artist/genre
+                    results = sp.search(q=based_on, type='artist', limit=1)
+                    if results['artists']['items']:
+                        artist_id = results['artists']['items'][0]['id']
+
+                        # Get related artists
+                        related = sp.artist_related_artists(artist_id)
+
+                        result = f"🎵 **Artists similar to {based_on}:**\n\n"
+                        for i, artist in enumerate(related['artists'][:5], 1):
+                            result += f"{i}. {artist['name']}\n"
+
+                        # Open Spotify artist radio
+                        devices = sp.devices()
+                        if devices and devices['devices']:
+                            return result + f"\n\nTip: Use 'create radio station based on {based_on}' to start a discovery playlist!"
+
+                        return result
+                else:
+                    # Get user's top artists (requires additional auth scope)
+                    # For now, just open Spotify's Discover page
+                    webbrowser.open("https://open.spotify.com/genre/discover-page")
+                    return "🎵 Opened Spotify's Discover page where you can find personalized music recommendations!"
+            except:
+                pass
+
+        # Fallback to YouTube Music
+        if based_on:
+            encoded_query = urllib.parse.quote_plus(f"music like {based_on}")
+            url = f"https://music.youtube.com/search?q={encoded_query}"
+        else:
+            url = "https://music.youtube.com/explore"
+
+        webbrowser.open(url)
+        return "🎵 Opened YouTube Music's explore/discovery page where you can find new music!"
+
+    except Exception as e:
+        return f"Error discovering new music: {e}"
+
+
 # This is the list of tools that will be passed to the agent
 music_tools = [
     # Spotify tools
@@ -608,7 +887,7 @@ music_tools = [
     resume_music,
     set_volume,
     get_current_song,
-    
+
     # Enhanced YouTube tools with auto-play
     play_music_smart,  # Primary smart tool that tries multiple platforms
     auto_play_youtube_song,  # Direct auto-play YouTube
@@ -619,5 +898,12 @@ music_tools = [
     search_youtube_music,
     play_youtube_music_playlist,
     open_youtube_music_library,
-    create_youtube_music_station
+    create_youtube_music_station,
+
+    # New enhanced tools
+    search_song_lyrics,
+    search_lyrics_web,
+    play_genre_playlist,
+    play_mood_music,
+    discover_new_music
 ]

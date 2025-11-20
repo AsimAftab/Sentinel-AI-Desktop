@@ -143,6 +143,7 @@ from langgraph.prebuilt import create_react_agent
 from src.graph.agent_state import AgentState
 from src.tools.browser_tools import browser_tools
 from src.tools.music_tools import music_tools
+from src.tools.playwright_music_tools import playwright_music_tools
 from IPython.display import Image, display
 
 
@@ -159,15 +160,16 @@ llm = AzureChatOpenAI(
 )
 
 browser_agent_tools = browser_tools
-music_agent_tools = music_tools
+# Combine standard music tools with Playwright automation tools
+music_agent_tools = music_tools + playwright_music_tools
 
 # --- Supervisor Chain definition (No changes needed here) ---
 supervisor_prompt_str = """You are a supervisor in a multi-agent AI system. Your role is to oversee a team of specialized agents and route user requests.
 Based on the last user message, you must select the next agent to act from the available list or decide if the task is complete.
 
 Available agents:
-- `Browser`: For tasks that require accessing the internet, searching for information, or scraping websites.
-- `Music`: For tasks related to searching for and playing songs on Spotify.
+- `Browser`: For tasks requiring internet access, web search, weather info, news, translation, currency conversion, word definitions, website status checks, and file downloads.
+- `Music`: For music-related tasks including playing songs on Spotify/YouTube/YouTube Music (with auto-play), controlling playback, searching lyrics, creating playlists, mood-based music, genre playlists, and music discovery.
 - `FINISH`: If the user's question has been fully answered and the task is complete.
 
 Analyze the conversation and output *only* the name of the next agent to act.
