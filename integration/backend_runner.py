@@ -6,12 +6,55 @@ import sys
 import os
 import threading
 import traceback
+import logging
 from pathlib import Path
 from .communication import CommunicationBus, Message, MessageType, BackendStatus
 
 
 # Store original working directory
 _original_cwd = os.getcwd()
+
+
+class LogStreamHandler(logging.Handler):
+    """Custom logging handler that streams logs to frontend via CommunicationBus."""
+    
+    def __init__(self, comm_bus):
+        super().__init__()
+        self.comm_bus = comm_bus
+        self.setLevel(logging.DEBUG)
+        
+    def emit(self, record):
+        try:
+            log_entry = self.format(record)
+            self.comm_bus.send_to_frontend(
+                Message(MessageType.LOG, data=log_entry)
+            )
+        except Exception:
+            self.handleError(record)
+
+
+class StdoutCapture:
+    """Captures stdout/stderr and sends to frontend via CommunicationBus."""
+    
+    def __init__(self, original_stream, comm_bus):
+        self.original_stream = original_stream
+        self.comm_bus = comm_bus
+        
+    def write(self, text):
+        # Write to original stream (console)
+        if self.original_stream:
+            self.original_stream.write(text)
+            self.original_stream.flush()
+        
+        # Send to frontend if not empty/whitespace
+        if text.strip():
+            self.comm_bus.send_to_frontend(
+                Message(MessageType.LOG, data=text.rstrip())
+            )
+    
+    def flush(self):
+        if self.original_stream:
+            self.original_stream.flush()
 
 
 class BackendRunner:
@@ -65,6 +108,20 @@ class BackendRunner:
             # Change to backend directory (needed for other file references)
             original_cwd = os.getcwd()
             os.chdir(self.backend_path)
+
+            # Setup log streaming to frontend
+            log_handler = LogStreamHandler(self.comm_bus)
+            log_handler.setFormatter(logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%H:%M:%S'
+            ))
+            logging.getLogger().addHandler(log_handler)
+            
+            # Capture stdout and stderr (print statements)
+            sys.stdout = StdoutCapture(sys.stdout, self.comm_bus)
+            sys.stderr = StdoutCapture(sys.stderr, self.comm_bus)
+            
+            print(f"[OK] Log streaming to frontend enabled (logging + stdout/stderr)")
 
             # Import and patch backend modules to inject status updates
             self._patch_backend_modules()
