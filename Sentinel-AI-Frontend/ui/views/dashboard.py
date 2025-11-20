@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QFrame, QMessageBox, QFileDialog, QSpacerItem, QSizePolicy,
-    QGridLayout
+    QGridLayout, QStackedWidget
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QFont, QIcon
@@ -13,6 +13,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from services.meet_service import MeetService
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from ui.views.logs_page import LogsPage
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -50,7 +51,10 @@ class DashboardPage(QWidget):
 
         # Connect the service_result signal to the _on_service_result slot
         self.service_result.connect(self._on_service_result)
+        self.home_content = None
+        self.logs_page = None
 
+        self.logs_page = LogsPage()
         self.setup_layout()
 
     def setup_layout(self):
@@ -58,40 +62,43 @@ class DashboardPage(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
         # ----- Top Section -----
         top_section = QHBoxLayout()
         top_section.setContentsMargins(0, 0, 0, 0)
-
-        # Enhanced Sidebar
+        # Enhanced Sidebar (unchanged)
         sidebar = self.create_enhanced_sidebar()
         top_section.addWidget(sidebar)
-
-        # ----- Main Content -----
-        content_wrapper = QVBoxLayout()
+        # ----- Main Content with Page Switching -----
+        # Create stacked widget for different pages
+        self.content_stack = QStackedWidget()
+        
+        # Create home page as a separate widget
+        home_page = QWidget()
+        content_wrapper = QVBoxLayout(home_page)
         content_wrapper.setContentsMargins(25, 25, 25, 15)
         content_wrapper.setSpacing(25)
-
-        # Dashboard Header
+        # Add existing home content (keep all existing content)
         header_section = self.create_dashboard_header()
         content_wrapper.addWidget(header_section)
-
-        # Statistics Cards Row
         stats_section = self.create_statistics_section()
         content_wrapper.addWidget(stats_section)
-
-        # Quick Actions Section
         quick_actions = self.create_quick_actions_section()
         content_wrapper.addWidget(quick_actions)
-
-        # Enhanced Connection Panel
         connection_section = self.create_responsive_connection_section()
         content_wrapper.addWidget(connection_section)
-
-        # Add stretch to push content to top
         content_wrapper.addStretch(1)
-
-        top_section.addLayout(content_wrapper)
+        # Store home content and create logs page
+        self.home_content = home_page
+        self.logs_page = LogsPage()
+        
+        # Add pages to stack
+        self.content_stack.addWidget(self.home_content)
+        self.content_stack.addWidget(self.logs_page)
+        
+        # Show home page by default
+        self.content_stack.setCurrentWidget(self.home_content)
+        # Add stacked widget to layout
+        top_section.addWidget(self.content_stack)
         main_layout.addLayout(top_section)
 
     def resizeEvent(self, event):
@@ -185,10 +192,18 @@ class DashboardPage(QWidget):
         if os.path.exists(icon_path):
             self.settings_button.setIcon(QIcon(icon_path))
         self.settings_button.clicked.connect(lambda: self.handle_sidebar_click("settings"))
-
+        self.settings_button.clicked.connect(lambda: self.handle_sidebar_click("settings"))
+        self.logs_button = QPushButton("Logs")
+        self.logs_button.setObjectName("logs_button")
+        icon_path = "icons/logs_icon.png"
+        if os.path.exists(icon_path):
+            self.logs_button.setIcon(QIcon(icon_path))
+        # Added the missing ')' at the end
+        self.logs_button.clicked.connect(lambda: self.handle_sidebar_click("logs"))
         navigation_layout.addWidget(self.home_button)
         navigation_layout.addWidget(self.tasks_button)
         navigation_layout.addWidget(self.agents_button)
+        navigation_layout.addWidget(self.logs_button)
         navigation_layout.addWidget(self.settings_button)
 
         # User Section
@@ -488,6 +503,10 @@ class DashboardPage(QWidget):
         elif button_name == "agents":
             self.agents_button.setChecked(True)
             print("🤖 Agents clicked")
+        elif button_name == "logs":  # ADD THIS BLOCK
+            self.logs_button.setChecked(True)
+            self.content_stack.setCurrentWidget(self.logs_page)
+            print("📋 Logs clicked")
         elif button_name == "settings":
             self.settings_button.setChecked(True)
             print("⚙️ Settings clicked")

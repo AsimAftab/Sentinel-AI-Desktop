@@ -19,6 +19,7 @@ class MessageType(Enum):
     BACKEND_READY = "backend_ready"
     BACKEND_STOPPING = "backend_stopping"
     SHUTDOWN_REQUEST = "shutdown_request"
+    LOG = "log"  # For streaming backend logs to frontend
 
 
 class BackendStatus(Enum):
