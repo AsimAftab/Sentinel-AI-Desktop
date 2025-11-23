@@ -26,6 +26,15 @@ else:
 # --- If the check above passes, we proceed ---
 print("--- 5. Key found successfully. Now importing the rest of the application... ---")
 
+# Check LangSmith configuration
+langsmith_enabled = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
+if langsmith_enabled:
+    print(f"--- 5a. 🔍 LangSmith tracing ENABLED for project: '{langsmith_project}' ---")
+    print("--- 5b. View traces at: https://smith.langchain.com ---")
+else:
+    print("--- 5a. ℹ️ LangSmith tracing disabled. Set LANGCHAIN_TRACING_V2=true to enable. ---")
+
 # This import will trigger the chain reaction that leads to Tavily being initialized.
 from src.utils.orchestrator import run_sentinel_agent
 

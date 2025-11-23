@@ -18,12 +18,8 @@ class UserContextWriter:
         self.frontend_dir = Path(__file__).parent.parent
         self.project_root = self.frontend_dir.parent
 
-        # Context file locations (write to both for reliability)
-        self.context_paths = [
-            self.project_root / "user_context.json",  # Project root
-            self.frontend_dir / "user_context.json",  # Frontend dir
-            self.project_root / "Sentinel-AI-Backend" / "user_context.json",  # Backend dir
-        ]
+        # Single canonical location for user context
+        self.context_path = self.project_root / "user_context.json"
 
     def write_user_context(self, user_id: str, username: str, additional_data: dict = None):
         """
@@ -45,18 +41,17 @@ class UserContextWriter:
         if additional_data:
             context.update(additional_data)
 
-        # Write to all locations
-        for path in self.context_paths:
-            try:
-                # Create directory if needed
-                path.parent.mkdir(parents=True, exist_ok=True)
+        # Write to canonical location
+        try:
+            # Create directory if needed
+            self.context_path.parent.mkdir(parents=True, exist_ok=True)
 
-                with open(path, 'w') as f:
-                    json.dump(context, f, indent=2)
+            with open(self.context_path, 'w') as f:
+                json.dump(context, f, indent=2)
 
-                print(f"✅ User context written to: {path}")
-            except Exception as e:
-                print(f"⚠️ Failed to write context to {path}: {e}")
+            print(f"✅ User context written to: {self.context_path}")
+        except Exception as e:
+            print(f"⚠️ Failed to write user context: {e}")
 
     def clear_user_context(self):
         """Clear user context (called on logout)."""
@@ -68,23 +63,21 @@ class UserContextWriter:
             "updated_at": datetime.utcnow().isoformat(),
         }
 
-        for path in self.context_paths:
-            try:
-                if path.exists():
-                    with open(path, 'w') as f:
-                        json.dump(context, f, indent=2)
-                    print(f"✅ User context cleared: {path}")
-            except Exception as e:
-                print(f"⚠️ Failed to clear context at {path}: {e}")
+        try:
+            if self.context_path.exists():
+                with open(self.context_path, 'w') as f:
+                    json.dump(context, f, indent=2)
+                print(f"✅ User context cleared: {self.context_path}")
+        except Exception as e:
+            print(f"⚠️ Failed to clear user context: {e}")
 
     def read_user_context(self) -> dict:
         """Read current user context (for debugging)."""
-        for path in self.context_paths:
-            if path.exists():
-                try:
-                    with open(path, 'r') as f:
-                        return json.load(f)
-                except Exception as e:
-                    print(f"⚠️ Failed to read context from {path}: {e}")
+        if self.context_path.exists():
+            try:
+                with open(self.context_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"⚠️ Failed to read user context: {e}")
 
         return {"current_user_id": None, "session_active": False}
