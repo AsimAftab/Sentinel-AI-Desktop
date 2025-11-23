@@ -28,6 +28,14 @@ google-api-python-client==2.154.0
 requests==2.32.3
 beautifulsoup4==4.13.4
 
+# System Control Tools
+pycaw==20240210
+comtypes==1.4.8
+screen-brightness-control==0.23.0
+psutil==6.1.1
+pyautogui==0.9.54
+Pillow==11.0.0
+
 # Configuration
 python-dotenv==1.1.0
 
