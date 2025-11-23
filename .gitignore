@@ -29,7 +29,6 @@ Thumbs.db
 *.tmp
 temp/
 
-*.md
 # PyQt Designer files
 *.ui
 
