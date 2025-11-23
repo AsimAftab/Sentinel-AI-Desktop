@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Dict, Tuple, Callable
 
 from .meet_service import MeetService
+from .spotify_service import SpotifyService
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class ServiceManager:
         # register default implementations here
         self._services: Dict[str, Service] = {
             "GMeet": MeetService(),
+            "Spotify": SpotifyService(),
             # register other services here as they are implemented
         }
 

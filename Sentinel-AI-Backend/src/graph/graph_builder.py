@@ -163,20 +163,28 @@ llm = AzureChatOpenAI(
 )
 
 browser_agent_tools = browser_tools
-# Prioritize existing-browser tools first, then Playwright, then other tools
-# This ensures the agent uses the user's existing browser when possible
-from src.tools.music_tools import auto_play_youtube_song, play_music_smart
 
-# Reorder to prioritize existing browser usage
+# Music tools prioritization:
+# 1. LOGGED-IN BROWSER tools FIRST - uses user's existing browser (no ads, personalized)
+# 2. Spotify tools - for Spotify playback
+# 3. Playwright tools - AVOID (opens new browser, not logged in, shows ads)
+from src.tools.music_tools import auto_play_youtube_music_song, auto_play_youtube_song, play_music_smart
+
+# Prioritize tools that use user's logged-in browser
 priority_music_tools = [
-    auto_play_youtube_song,  # FIRST - uses existing browser
-    play_music_smart,        # SECOND - smart fallback
+    auto_play_youtube_music_song,  # FIRST - YouTube Music in logged-in browser (BEST!)
+    auto_play_youtube_song,        # SECOND - Regular YouTube in logged-in browser (BEST!)
+    play_music_smart,              # THIRD - Smart platform selector (tries Spotify first)
 ]
 
-# Then add Playwright tools for when we need full automation
-music_agent_tools = priority_music_tools + playwright_music_tools + [
+# Add all other tools EXCEPT Playwright (only use if explicitly needed)
+# Playwright opens new browser = not logged in = ads + no personalization
+music_agent_tools = priority_music_tools + [
     tool for tool in music_tools if tool not in priority_music_tools
 ]
+
+# NOTE: Playwright tools excluded by default (not logged in, shows ads)
+# Add them back only if user specifically requests automation
 
 meeting_agent_tools = meeting_tools
 system_agent_tools = system_tools
@@ -245,21 +253,29 @@ def create_agent_node(llm, tools, agent_name: str, custom_prompt: str = None):
 
 browser_agent_node = create_agent_node(llm, browser_agent_tools, "Browser")
 
-# Music agent with custom prompt emphasizing auto-play tools
+# Music agent with custom prompt emphasizing logged-in browser tools
 music_agent_prompt = """You are the Music agent. Your job is to help users play music and manage playback.
 
-IMPORTANT: For YouTube music playback, PRIORITIZE these tools in order:
-1. BEST: auto_play_youtube_song - Uses existing browser, finds direct video link, auto-plays
-2. Alternative: playwright_play_youtube - Opens new browser window with automation
-3. AVOID: play_on_youtube (deprecated - only opens search page)
+CRITICAL: ALWAYS use tools that open in the user's LOGGED-IN browser!
+This ensures no ads, personalized recommendations, and access to their library.
 
-For YouTube Music specifically:
-1. BEST: auto_play_youtube_song - Works great for YT Music too
-2. Alternative: playwright_play_youtube_music - New browser automation
+TOOL PRIORITY (ALWAYS use these first):
+1. YouTube Music requests → auto_play_youtube_music_song (opens in logged-in browser)
+2. Regular YouTube requests → auto_play_youtube_song (opens in logged-in browser)
+3. Spotify requests → search_and_play_song (uses user's Spotify account)
+4. Smart selection → play_music_smart (tries Spotify first, then YouTube Music)
 
-For Spotify: use search_and_play_song
+PLATFORM SELECTION RULES:
+- "YouTube Music" or "YT Music" → auto_play_youtube_music_song
+- "YouTube" (regular) → auto_play_youtube_song
+- "Spotify" → search_and_play_song
+- No platform specified → Try Spotify first (if connected), else YouTube Music
 
-Always prefer tools that use the user's existing browser over creating new instances."""
+IMPORTANT:
+- NEVER use Playwright tools (they open NEW browser = not logged in = ADS!)
+- ALWAYS use auto_play_youtube_music_song for YouTube Music (logged-in browser)
+- ALWAYS use auto_play_youtube_song for regular YouTube (logged-in browser)
+- These tools find the direct video link and open it in the user's existing browser"""
 
 music_agent_node = create_agent_node(llm, music_agent_tools, "Music", custom_prompt=music_agent_prompt)
 
