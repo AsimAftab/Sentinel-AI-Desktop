@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFrame, QMessageBox, QGridLayout, QSizePolicy, QScrollArea
+    QFrame, QMessageBox, QGridLayout, QSizePolicy, QScrollArea, QProgressDialog
 )
 from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtGui import QPixmap, QFont
@@ -8,6 +8,9 @@ import qtawesome as qta
 import os
 from auth.session_manager import SessionManager
 from database.user_service import UserService
+from services.service_manager import ServiceManager
+from services.token_store import TokenStore
+from utils.user_context_writer import UserContextWriter
 
 
 class DashboardPage(QWidget):
@@ -49,24 +52,48 @@ class DashboardPage(QWidget):
 
         # Fetch user_id from MongoDB
         self.user_id = None
+        self.fullname = None
         try:
             user_service = UserService()
             db_user = user_service.get_user_by_username(self.username)
             if db_user and '_id' in db_user:
                 self.user_id = str(db_user['_id'])
+                self.fullname = db_user.get('fullname', self.username)
                 print(f"✅ Dashboard: Fetched user_id: {self.user_id}")
         except Exception as e:
             print(f"⚠️ Dashboard: Failed to fetch user_id: {e}")
 
-        # Define services list (will be used for dynamic counts)
-        self.services = [
-            ("Google Workspace", "Gmail, Drive, Calendar, and more", "fa5b.google", True),  # Only this is connected
-            ("Zoom", "Video conferencing and meetings", "fa5s.video", False),
-            ("Slack", "Team messaging and collaboration", "fa5b.slack", False),
-            ("Microsoft Teams", "Chat, meetings, and collaboration", "fa5b.microsoft", False),
-            ("YouTube Music", "Music streaming and playlists", "fa5b.youtube", False),
-            ("Spotify", "Music and podcast streaming", "fa5b.spotify", False)
+        # Initialize service manager, token store, and user context writer
+        self.service_manager = ServiceManager()
+        self.token_store = TokenStore()
+        self.user_context_writer = UserContextWriter()
+
+        # Map service display names to internal service names
+        self.service_name_map = {
+            "Google Workspace": "GMeet",
+            "Zoom": "Zoom",
+            "Slack": "Slack",
+            "Microsoft Teams": "Teams",
+            "YouTube Music": "YouTubeMusic",
+            "Spotify": "Spotify"
+        }
+
+        # Define services list with metadata (display_name, description, icon)
+        # Connection status will be loaded dynamically from MongoDB
+        self.service_definitions = [
+            ("Google Workspace", "Gmail, Gmeet, Calendar, and more", "fa5b.google"),
+            ("Zoom", "Video conferencing and meetings", "fa5s.video"),
+            ("Slack", "Team messaging and collaboration", "fa5b.slack"),
+            ("Microsoft Teams", "Chat, meetings, and collaboration", "fa5b.microsoft"),
+            ("YouTube Music", "Music streaming and playlists", "fa5b.youtube"),
+            ("Spotify", "Music and podcast streaming", "fa5b.spotify")
         ]
+
+        # Load actual service connection status from MongoDB
+        self.services = self._load_service_status()
+
+        # Update user_context.json on dashboard load
+        self._update_user_context()
 
         # Backend status tracking
         self.backend_status = "Backend Not Connected"
@@ -136,6 +163,67 @@ class DashboardPage(QWidget):
         # ===== MAIN CONTENT AREA =====
         content_area = self.create_content_area()
         main_layout.addWidget(content_area)
+
+    def _load_service_status(self):
+        """Load actual service connection status from MongoDB."""
+        services_with_status = []
+
+        for display_name, description, icon in self.service_definitions:
+            # Get internal service name
+            internal_name = self.service_name_map.get(display_name, display_name)
+
+            # Check if token exists in MongoDB for this user
+            is_connected = False
+            if self.user_id:
+                try:
+                    result = self.token_store.get_token(internal_name, self.user_id)
+                    is_connected = result.get("ok", False)
+                    if is_connected:
+                        print(f"✅ Service '{display_name}' ({internal_name}) is connected")
+                except Exception as e:
+                    print(f"⚠️ Error checking connection for {display_name}: {e}")
+
+            services_with_status.append((display_name, description, icon, is_connected))
+
+        return services_with_status
+
+    def _update_user_context(self):
+        """Update user_context.json with current user information."""
+        if self.user_id and self.username:
+            additional_data = {}
+            if self.fullname:
+                additional_data['fullname'] = self.fullname
+            self.user_context_writer.write_user_context(
+                self.user_id,
+                self.username,
+                additional_data
+            )
+
+    def _refresh_dashboard(self):
+        """Reload service status and refresh the entire dashboard."""
+        print("🔄 Refreshing dashboard...")
+
+        # Reload service status from MongoDB
+        self.services = self._load_service_status()
+
+        # Clear and rebuild the layout
+        # Get the main layout
+        layout = self.layout()
+
+        # Clear all widgets
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Rebuild sidebar and content area
+        sidebar = self.create_sidebar()
+        layout.addWidget(sidebar)
+
+        content_area = self.create_content_area()
+        layout.addWidget(content_area)
+
+        print("✅ Dashboard refreshed")
 
     def create_sidebar(self):
         """Create the left navigation sidebar"""
@@ -447,9 +535,179 @@ class DashboardPage(QWidget):
         action_btn.setObjectName("disconnectBtn" if is_active else "connectBtn")
         action_btn.setCursor(Qt.PointingHandCursor)
         action_btn.setFixedHeight(36)
+
+        # Wire up click handler
+        if is_active:
+            action_btn.clicked.connect(lambda: self._handle_disconnect(service_name))
+        else:
+            action_btn.clicked.connect(lambda: self._handle_connect(service_name))
+
         card_layout.addWidget(action_btn)
 
         return card
+
+    def _handle_connect(self, service_display_name):
+        """Handle service connection request."""
+        # Get internal service name
+        internal_name = self.service_name_map.get(service_display_name, service_display_name)
+
+        print(f"🔌 Connecting to {service_display_name} ({internal_name})...")
+
+        # Check if service is registered in ServiceManager
+        if internal_name not in self.service_manager.list_services():
+            QMessageBox.warning(
+                self,
+                "Service Not Available",
+                f"{service_display_name} integration is not yet implemented.\n\n"
+                f"Currently only Google Workspace is supported."
+            )
+            return
+
+        # Show progress dialog (OAuth flow can take a while)
+        progress = QProgressDialog(
+            f"Connecting to {service_display_name}...\n\nA browser window will open for authentication.",
+            None,  # No cancel button
+            0, 0,  # Indeterminate progress
+            self
+        )
+        progress.setWindowTitle("Authenticating")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        try:
+            # Call ServiceManager to connect (runs in background thread)
+            # But we need to pass user_id to MeetService
+            # So we need to re-register the service with user_id
+            if internal_name == "GMeet":
+                from services.meet_service import MeetService
+                self.service_manager.register_service(
+                    "GMeet",
+                    MeetService(user_id=self.user_id)
+                )
+
+            future = self.service_manager.connect(internal_name)
+
+            # Wait for result (blocking, but in GUI thread - not ideal but simple)
+            success, message = future.result()
+
+            progress.close()
+
+            if success:
+                print(f"✅ Connected to {service_display_name}: {message}")
+
+                # Update user_context.json
+                self._update_user_context()
+
+                # Show success message
+                QMessageBox.information(
+                    self,
+                    "Connection Successful",
+                    f"Successfully connected to {service_display_name}!\n\n{message}"
+                )
+
+                # Refresh dashboard to show updated status
+                self._refresh_dashboard()
+            else:
+                print(f"❌ Failed to connect to {service_display_name}: {message}")
+                QMessageBox.warning(
+                    self,
+                    "Connection Failed",
+                    f"Failed to connect to {service_display_name}.\n\n{message}"
+                )
+
+        except Exception as e:
+            progress.close()
+            print(f"❌ Error connecting to {service_display_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Connection Error",
+                f"An error occurred while connecting to {service_display_name}:\n\n{str(e)}"
+            )
+
+    def _handle_disconnect(self, service_display_name):
+        """Handle service disconnection request."""
+        # Get internal service name
+        internal_name = self.service_name_map.get(service_display_name, service_display_name)
+
+        # Confirm disconnection
+        reply = QMessageBox.question(
+            self,
+            "Confirm Disconnect",
+            f"Are you sure you want to disconnect from {service_display_name}?\n\n"
+            f"This will remove your stored credentials.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        print(f"🔌 Disconnecting from {service_display_name} ({internal_name})...")
+
+        try:
+            # Delete token from MongoDB
+            if self.user_id:
+                result = self.token_store.delete_token(internal_name, self.user_id)
+                if result.get("ok"):
+                    deleted_count = result.get("deleted_count", 0)
+                    print(f"✅ Deleted {deleted_count} tokens from MongoDB for {service_display_name}")
+
+                    # Also delete the token.json file to force OAuth on reconnect
+                    # dashboard.py is at: Sentinel-AI-Frontend/ui/views/dashboard.py
+                    # We need to go up 3 levels to get to Sentinel-AI-Frontend/
+                    current_file_dir = os.path.dirname(os.path.abspath(__file__))  # .../ui/views
+                    ui_dir = os.path.dirname(current_file_dir)  # .../ui
+                    frontend_dir = os.path.dirname(ui_dir)  # .../Sentinel-AI-Frontend
+                    token_path = os.path.join(frontend_dir, "token.json")
+
+                    print(f"🔍 Looking for token.json at: {token_path}")
+
+                    if os.path.exists(token_path):
+                        try:
+                            os.remove(token_path)
+                            print(f"✅ Deleted token.json file at {token_path}")
+                        except Exception as e:
+                            print(f"⚠️ Warning: Could not delete token.json: {e}")
+                    else:
+                        print(f"ℹ️ No token.json file found at {token_path} (already deleted or never existed)")
+
+                    # Update user_context.json
+                    self._update_user_context()
+
+                    QMessageBox.information(
+                        self,
+                        "Disconnected",
+                        f"Successfully disconnected from {service_display_name}."
+                    )
+
+                    # Refresh dashboard
+                    self._refresh_dashboard()
+                else:
+                    error = result.get("error", "Unknown error")
+                    QMessageBox.warning(
+                        self,
+                        "Disconnect Failed",
+                        f"Failed to disconnect from {service_display_name}:\n\n{error}"
+                    )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Error",
+                    "User ID not available. Cannot disconnect."
+                )
+
+        except Exception as e:
+            print(f"❌ Error disconnecting from {service_display_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Disconnect Error",
+                f"An error occurred while disconnecting:\n\n{str(e)}"
+            )
 
     def update_backend_status(self):
         """Update backend status from communication bus"""
