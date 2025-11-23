@@ -117,7 +117,7 @@ QLineEdit#fullnameInput:focus,
 QLineEdit#phoneInput:focus,
 QLineEdit#emailInput:focus,
 QLineEdit#confirmPasswordInput:focus {
-    border: 1.5px solid #3b82f6;
+    border: 2px solid #3b82f6;
     background-color: #151b2d;
     outline: none;
 }

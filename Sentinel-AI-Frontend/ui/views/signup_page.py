@@ -49,49 +49,13 @@ class SignupPage(QWidget):
 
         # Main Layout centered on screen
         main_layout = QVBoxLayout(self)
-        main_layout.setAlignment(Qt.AlignCenter)
-        main_layout.setContentsMargins(20, 30, 20, 20)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(0)
 
-        # --- 1. HEADER SECTION ---
-        # User Plus Icon
-        self.icon_container = QWidget()
-        self.icon_container.setFixedSize(64, 64)
-        icon_layout = QVBoxLayout(self.icon_container)
-        icon_layout.setContentsMargins(0, 0, 0, 0)
-        icon_layout.setAlignment(Qt.AlignCenter)
+        # Add stretch before card to center it vertically
+        main_layout.addStretch()
 
-        try:
-            # Try QtAwesome icon first
-            self.icon_label = QLabel()
-            self.icon_label.setAlignment(Qt.AlignCenter)
-            user_plus_icon = qta.icon('fa5s.user-plus', color='#fbbf24', scale_factor=1.8)
-            pixmap = user_plus_icon.pixmap(60, 60)
-            self.icon_label.setPixmap(pixmap)
-            icon_layout.addWidget(self.icon_label)
-        except:
-            # Fallback to emoji
-            self.icon_label = QLabel("👤")
-            self.icon_label.setStyleSheet("font-size: 50px; color: #fbbf24; background: transparent;")
-            self.icon_label.setAlignment(Qt.AlignCenter)
-            icon_layout.addWidget(self.icon_label)
-
-        # App Title & Subtitle
-        self.app_title = QLabel("Sentinel-AI")
-        self.app_title.setObjectName("headerTitle")
-        self.app_title.setAlignment(Qt.AlignCenter)
-
-        self.app_subtitle = QLabel("Join the Future of Security")
-        self.app_subtitle.setObjectName("headerSubtitle")
-        self.app_subtitle.setAlignment(Qt.AlignCenter)
-
-        # Add widgets to main layout
-        main_layout.addWidget(self.icon_container, 0, Qt.AlignHCenter)
-        main_layout.addWidget(self.app_title)
-        main_layout.addWidget(self.app_subtitle)
-        main_layout.addSpacing(25)
-
-        # --- 2. SIGNUP CARD ---
+        # --- 1. SIGNUP CARD ---
         self.card = QFrame()
         self.card.setObjectName("signupCard")
         self.card.setMaximumWidth(480)
@@ -362,14 +326,17 @@ class SignupPage(QWidget):
         card_layout.addSpacing(15)
         card_layout.addLayout(signin_layout)
 
-        main_layout.addWidget(self.card)
-        main_layout.addStretch()
+        # Create horizontal layout to center card horizontally
+        card_container = QHBoxLayout()
+        card_container.addStretch()
+        card_container.addWidget(self.card)
+        card_container.addStretch()
 
-        # --- 3. FOOTER ---
-        self.footer = QLabel("© 2025 Sentinel-AI. All rights reserved.")
-        self.footer.setObjectName("footerText")
-        self.footer.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.footer)
+        # Add card container to main layout
+        main_layout.addLayout(card_container)
+
+        # Add stretch after card to center it vertically
+        main_layout.addStretch()
 
         # Set focus to fullname field on load
         self.fullname_input.setFocus()

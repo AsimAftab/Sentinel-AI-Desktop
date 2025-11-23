@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (
     QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
     QHBoxLayout, QFrame, QMessageBox, QCheckBox, QAction, QGraphicsDropShadowEffect
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QTimer
 from PyQt5.QtGui import QIcon, QPixmap, QColor, QPainter
 from PyQt5.QtSvg import QSvgWidget
 import qtawesome as qta
@@ -13,6 +13,7 @@ from auth.keyring_auth import KeyringAuthFixed
 from auth.session_manager import SessionManager
 from utils.user_context_writer import UserContextWriter
 from database.user_service import UserService
+from ui.widgets.loading_spinner import LoadingOverlay
 
 
 # Helper class to make labels (like "Sign up") clickable
@@ -47,61 +48,17 @@ class LoginPage(QWidget):
         self.switch_to_signup = switch_to_signup
         self.switch_to_dashboard = switch_to_dashboard
         self.password_visible = False
+        self.is_logging_in = False  # Track login state to prevent showEvent interference
 
         # Main Layout centered on screen
         main_layout = QVBoxLayout(self)
-        main_layout.setAlignment(Qt.AlignCenter)
-        main_layout.setContentsMargins(20, 30, 20, 20)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(0)
 
-        # --- 1. HEADER SECTION ---
-        # Lock Icon using Container.svg
-        self.icon_container = QWidget()
-        self.icon_container.setFixedSize(64, 64)
-        icon_layout = QVBoxLayout(self.icon_container)
-        icon_layout.setContentsMargins(0, 0, 0, 0)
-        icon_layout.setAlignment(Qt.AlignCenter)
+        # Add stretch before card to center it vertically
+        main_layout.addStretch()
 
-        try:
-            # Try to load the SVG file using absolute path
-            svg_path = os.path.join(os.path.dirname(__file__), "..", "assests", "Container.svg")
-            svg_path = os.path.normpath(svg_path)
-            self.svg_widget = QSvgWidget(svg_path)
-            self.svg_widget.setFixedSize(64, 64)
-            icon_layout.addWidget(self.svg_widget)
-        except Exception as e:
-            # Fallback to QtAwesome if SVG loading fails
-            try:
-                self.icon_label = QLabel()
-                self.icon_label.setAlignment(Qt.AlignCenter)
-                lock_icon = qta.icon('fa5s.lock', color='#fbbf24', scale_factor=1.8)
-                pixmap = lock_icon.pixmap(60, 60)
-                self.icon_label.setPixmap(pixmap)
-                icon_layout.addWidget(self.icon_label)
-            except:
-                # Final fallback to emoji
-                self.icon_label = QLabel("🔒")
-                self.icon_label.setStyleSheet("font-size: 50px; color: #fbbf24; background: transparent;")
-                self.icon_label.setAlignment(Qt.AlignCenter)
-                icon_layout.addWidget(self.icon_label)
-            print(f"SVG loading error: {e}")
-
-        # App Title & Subtitle
-        self.app_title = QLabel("Sentinel-AI")
-        self.app_title.setObjectName("headerTitle")
-        self.app_title.setAlignment(Qt.AlignCenter)
-
-        self.app_subtitle = QLabel("Secure Access Portal")
-        self.app_subtitle.setObjectName("headerSubtitle")
-        self.app_subtitle.setAlignment(Qt.AlignCenter)
-
-        # Add widgets to main layout with explicit center alignment for the icon
-        main_layout.addWidget(self.icon_container, 0, Qt.AlignHCenter)
-        main_layout.addWidget(self.app_title)
-        main_layout.addWidget(self.app_subtitle)
-        main_layout.addSpacing(25)
-
-        # --- 2. LOGIN CARD ---
+        # --- 1. LOGIN CARD ---
         self.card = QFrame()
         self.card.setObjectName("loginCard")
         # Make card responsive with max and min width instead of fixed width
@@ -286,14 +243,20 @@ class LoginPage(QWidget):
         card_layout.addSpacing(15)
         card_layout.addLayout(signup_layout)
 
-        main_layout.addWidget(self.card)
+        # Create horizontal layout to center card horizontally
+        card_container = QHBoxLayout()
+        card_container.addStretch()
+        card_container.addWidget(self.card)
+        card_container.addStretch()
+
+        # Add card container to main layout
+        main_layout.addLayout(card_container)
+
+        # Add stretch after card to center it vertically
         main_layout.addStretch()
 
-        # --- 3. FOOTER ---
-        self.footer = QLabel("© 2025 Sentinel-AI. All rights reserved.")
-        self.footer.setObjectName("footerText")
-        self.footer.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.footer)
+        # --- 2. LOADING OVERLAY ---
+        self.loading_overlay = LoadingOverlay(self, message="Signing in...")
 
         # Set focus to username field on load
         self.username_input.setFocus()
@@ -352,20 +315,38 @@ class LoginPage(QWidget):
             self.password_input.setFocus()
             return
 
-        # Disable button and show loading state
-        self.login_btn.setEnabled(False)
-        self.login_btn.setText("Signing in...")
-        self.login_btn.setCursor(Qt.WaitCursor)
+        # Set login state flag
+        self.is_logging_in = True
 
+        # Show loading overlay with spinner
+        self.loading_overlay.show_overlay()
+
+        # Disable inputs during login
+        self.username_input.setEnabled(False)
+        self.password_input.setEnabled(False)
+        self.login_btn.setEnabled(False)
+
+        # Use QTimer to process login asynchronously (keeps UI responsive)
+        QTimer.singleShot(100, lambda: self._process_login(username, password))
+
+    def _process_login(self, username, password):
+        """Process login authentication (called asynchronously)"""
         try:
             # Authenticate user using KeyringAuthFixed
             success, message, user_data = KeyringAuthFixed.authenticate_user(username, password)
 
             if not success:
+                # Hide loading overlay
+                self.loading_overlay.hide_overlay()
+
+                # Reset login state
+                self.is_logging_in = False
+
+                # Show error and re-enable inputs
                 self.show_validation_hint("password", f"⚠ {message}")
                 self.password_input.clear()
                 self.password_input.setFocus()
-                self.reset_login_button()
+                self._reset_inputs()
                 return
 
             # Fetch user from MongoDB to get real _id
@@ -391,33 +372,53 @@ class LoginPage(QWidget):
             except Exception as e:
                 print(f"⚠️ Failed to write user context: {e}")
 
-            # Show success feedback
+            # Hide loading overlay and show success
+            self.loading_overlay.hide_overlay()
+
+            # Show success feedback on button
+            self.login_btn.setEnabled(True)
             self.login_btn.setText("✓ Success!")
             self.login_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #22c55e;
-                    border-color: #22c55e;
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #10b981, stop:1 #22c55e);
                 }
             """)
 
-            # Redirect to dashboard
-            if self.switch_to_dashboard:
-                self.switch_to_dashboard(username)
-            else:
-                QMessageBox.information(
-                    self,
-                    "Login Successful",
-                    f"Welcome back, {user_data.get('fullname', username)}!"
-                )
+            # Small delay before redirect for visual feedback
+            QTimer.singleShot(800, lambda: self._redirect_to_dashboard(username))
 
         except Exception as e:
+            # Hide loading overlay
+            self.loading_overlay.hide_overlay()
+
+            # Reset login state
+            self.is_logging_in = False
+
             # Handle unexpected errors
             QMessageBox.critical(
                 self,
                 "Connection Error",
                 f"Unable to connect to the server. Please try again.\n\nError: {str(e)}"
             )
-            self.reset_login_button()
+            self._reset_inputs()
+
+    def _redirect_to_dashboard(self, username):
+        """Redirect to dashboard after successful login"""
+        # Reset login state before switching pages
+        self.is_logging_in = False
+
+        if self.switch_to_dashboard:
+            self.switch_to_dashboard(username)
+
+    def _reset_inputs(self):
+        """Re-enable all inputs after error"""
+        self.username_input.setEnabled(True)
+        self.password_input.setEnabled(True)
+        self.login_btn.setEnabled(True)
+        self.login_btn.setText("Sign In")
+        self.login_btn.setCursor(Qt.PointingHandCursor)
+        self.login_btn.setStyleSheet("")
 
     def reset_login_button(self):
         """Reset login button to default state"""
@@ -425,6 +426,38 @@ class LoginPage(QWidget):
         self.login_btn.setText("Sign In")
         self.login_btn.setCursor(Qt.PointingHandCursor)
         self.login_btn.setStyleSheet("")  # Reset to default stylesheet
+
+    def reset_page_state(self):
+        """Public method to reset entire page state (called from logout)"""
+        self.is_logging_in = False
+        self.reset_login_button()
+        self.hide_validation_hints()
+        self.username_input.clear()
+        self.password_input.clear()
+        self.username_input.setEnabled(True)
+        self.password_input.setEnabled(True)
+        self.username_input.setFocus()
+
+    def showEvent(self, event):
+        """Handle page show - reset button state when returning to login"""
+        super().showEvent(event)
+
+        # Only reset state if not currently in login process
+        # This prevents interference during the login flow
+        if not self.is_logging_in:
+            self.reset_login_button()
+            self.hide_validation_hints()
+            # Clear password field for security when returning from other pages
+            if self.password_input.text():  # Only clear if there's text
+                self.password_input.clear()
+
+    def resizeEvent(self, event):
+        """Handle window resize to reposition loading overlay"""
+        super().resizeEvent(event)
+        if hasattr(self, 'loading_overlay') and self.loading_overlay.isVisible():
+            # Update overlay geometry to cover entire widget
+            self.loading_overlay.setGeometry(0, 0, self.width(), self.height())
+            self.loading_overlay._position_spinner()
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
