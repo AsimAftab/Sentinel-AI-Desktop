@@ -11,6 +11,7 @@ from auth.session_manager import SessionManager
 from services.service_manager import ServiceManager
 from concurrent.futures import Future, ThreadPoolExecutor
 from services.meet_service import MeetService
+from database.user_service import UserService
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from ui.views.logs_page import LogsPage
@@ -47,7 +48,22 @@ class DashboardPage(QWidget):
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._service_status_labels = {}   # map service name -> QLabel
         self._logger = logging.getLogger(__name__)
-        self._meet_service = MeetService()
+
+        # Fetch user_id from MongoDB for token linking
+        self.user_id = None
+        try:
+            user_service = UserService()
+            db_user = user_service.get_user_by_username(self.username)
+            if db_user and '_id' in db_user:
+                self.user_id = str(db_user['_id'])
+                print(f"✅ Dashboard: Fetched user_id: {self.user_id}")
+            else:
+                print(f"⚠️ Dashboard: User not found in MongoDB")
+        except Exception as e:
+            print(f"⚠️ Dashboard: Failed to fetch user_id: {e}")
+
+        # Create MeetService with user_id
+        self._meet_service = MeetService(user_id=self.user_id)
 
         # Connect the service_result signal to the _on_service_result slot
         self.service_result.connect(self._on_service_result)

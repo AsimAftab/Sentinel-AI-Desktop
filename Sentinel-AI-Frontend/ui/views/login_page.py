@@ -7,6 +7,8 @@ import os
 
 from auth.keyring_auth import KeyringAuthFixed
 from auth.session_manager import SessionManager
+from utils.user_context_writer import UserContextWriter
+from database.user_service import UserService
 
 class LoginPage(QWidget):
     def __init__(self, switch_to_signup=None, switch_to_dashboard=None):
@@ -146,6 +148,30 @@ class LoginPage(QWidget):
                 return
 
             QMessageBox.information(self, "Login Successful", f"Welcome {user_data['fullname']}!")
+
+            # Fetch user from MongoDB to get real _id
+            # (keyring doesn't have _id, need MongoDB document)
+            try:
+                user_service = UserService()
+                db_user = user_service.get_user_by_username(username)
+
+                if db_user and '_id' in db_user:
+                    user_id = str(db_user['_id'])
+                    print(f"✅ Fetched user_id from MongoDB: {user_id}")
+                else:
+                    # Fallback if DB user not found (shouldn't happen)
+                    user_id = username  # Use username as fallback
+                    print(f"⚠️ User not found in MongoDB, using username as fallback")
+
+                # Write user context for backend
+                context_writer = UserContextWriter()
+                context_writer.write_user_context(
+                    user_id=user_id,
+                    username=username,
+                    additional_data={'fullname': user_data.get('fullname')}
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to write user context: {e}")
 
             # Redirect to dashboard
             if self.switch_to_dashboard:

@@ -14,7 +14,11 @@ from services.token_store import TokenStore
 log = logging.getLogger(__name__)
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/meetings.space.created']
+# IMPORTANT: Must match backend meeting_tools.py scopes!
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/calendar.events'
+]
 
 
 class MeetService:
@@ -24,7 +28,7 @@ class MeetService:
     return a short message suitable for the UI: (bool, message).
     """
 
-    def __init__(self, credentials_path='credentials.json', token_path='token.json', scopes=None):
+    def __init__(self, credentials_path='credentials.json', token_path='token.json', scopes=None, user_id=None):
         # Get the Frontend directory path
         frontend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -33,6 +37,7 @@ class MeetService:
         self.token_path = os.path.join(frontend_dir, token_path) if not os.path.isabs(token_path) else token_path
 
         self.scopes = scopes or SCOPES
+        self.user_id = user_id  # Store user_id for linking tokens
         # token storage helper
         self._token_store = TokenStore()
 
@@ -70,7 +75,7 @@ class MeetService:
                             token_dict = json.loads(creds.to_json())
                         except Exception:
                             token_dict = {"raw": creds.to_json()}
-                        self._token_store.save_token("GMeet", token_dict, encrypt=bool(os.getenv("TOKEN_ENCRYPTION_KEY")))
+                        self._token_store.save_token("GMeet", token_dict, user_id=self.user_id)
                         return True, "Token refreshed (token.json updated)."
                     except Exception as exc:
                         tb = traceback.format_exc()
@@ -97,7 +102,7 @@ class MeetService:
                         token_dict = json.loads(creds.to_json())
                     except Exception:
                         token_dict = {"raw": creds.to_json()}
-                    self._token_store.save_token("GMeet", token_dict, encrypt=bool(os.getenv("TOKEN_ENCRYPTION_KEY")))
+                    self._token_store.save_token("GMeet", token_dict, user_id=self.user_id)
                     return True, "Authorization complete (token.json created)."
                 except Exception as exc:
                     tb = traceback.format_exc()
@@ -110,7 +115,7 @@ class MeetService:
                 token_dict = json.loads(creds.to_json())
             except Exception:
                 token_dict = {"raw": creds.to_json()}
-            self._token_store.save_token("GMeet", token_dict, encrypt=bool(os.getenv("TOKEN_ENCRYPTION_KEY")))
+            self._token_store.save_token("GMeet", token_dict, user_id=self.user_id)
             return True, "Valid credentials already present (token.json)."
 
         except Exception as exc:
