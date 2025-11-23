@@ -27,7 +27,7 @@ class FrontendEnhancer:
 
         # Import frontend modules
         try:
-            from ui.views import dashboard
+            from ui.views import dashboard  # type: ignore  # noqa: E402 - Dynamic import after sys.path modification
 
             # Monkey-patch the dashboard initialization to add our status widget
             original_init = dashboard.DashboardPage.__init__
@@ -36,7 +36,13 @@ class FrontendEnhancer:
                 # Call original init
                 original_init(self, *args, **kwargs)
 
-                # Add our status widget to the dashboard
+                # Check if this is the new dashboard design (has comm_bus attribute)
+                if hasattr(self, 'comm_bus'):
+                    # New dashboard already has built-in status support - skip injection
+                    print("ℹ️ New dashboard detected - skipping legacy status widget injection")
+                    return
+
+                # Add our status widget to the dashboard (legacy dashboards only)
                 self.backend_status_widget = BackendStatusWidget(self)
 
                 # Replace Quick Actions section with Voice Assistant widget

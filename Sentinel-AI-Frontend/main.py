@@ -24,6 +24,8 @@ class MainApp(QStackedWidget):
         self.setCurrentWidget(self.login_page)
 
     def show_login(self):
+        # Reset login page state when returning from dashboard
+        self.login_page.reset_page_state()
         self.setCurrentWidget(self.login_page)
 
     def show_signup(self):
@@ -51,17 +53,17 @@ if __name__ == '__main__':
 
     window = MainApp()
     window.setWindowTitle("Sentinel AI")
-    window.setMinimumSize(800, 600)  # Set minimum size instead of fixed
-    window.resize(1400, 1200)  # Default size
+    window.setFixedSize(1024, 768)  # Fixed size 1024x768
 
     try:
         window.setWindowIcon(QIcon("assets/icon.png"))
     except Exception as e:
         print("⚠️  Could not load icon:", e)
 
+    # Center window on screen
     screen = app.primaryScreen().availableGeometry()
-    x = (screen.width() - window.width()) // 2
-    y = (screen.height() - window.height()) // 2
+    x = (screen.width() - 1024) // 2
+    y = (screen.height() - 768) // 2
     window.move(x, y)
 
     window.show()

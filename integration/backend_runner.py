@@ -127,7 +127,7 @@ class BackendRunner:
             self._patch_backend_modules()
 
             # Import the orchestrator
-            from src.utils.orchestrator import run_sentinel_agent
+            from src.utils.orchestrator import run_sentinel_agent  # type: ignore  # noqa: E402 - Dynamic import after sys.path modification
 
             # Notify ready
             self.comm_bus.send_to_frontend(
@@ -165,7 +165,7 @@ class BackendRunner:
             # If imports fail, backend will still run without status updates
 
             try:
-                from src.utils import wake_word_listener
+                from src.utils import wake_word_listener  # type: ignore  # noqa: E402 - Dynamic import after sys.path modification
 
                 # Patch wake word listener to send status updates
                 if hasattr(wake_word_listener, 'WakeWordListener'):
@@ -189,7 +189,7 @@ class BackendRunner:
                 print(f"[WARNING] Could not patch wake_word_listener: {e}")
 
             try:
-                from src.utils import speech_recognizer
+                from src.utils import speech_recognizer  # type: ignore  # noqa: E402 - Dynamic import after sys.path modification
 
                 if hasattr(speech_recognizer, 'SpeechRecognizer'):
                     original_listen = speech_recognizer.SpeechRecognizer.listen_command
@@ -212,7 +212,7 @@ class BackendRunner:
                 print(f"[WARNING] Could not patch speech_recognizer: {e}")
 
             try:
-                from src.utils import langgraph_router
+                from src.utils import langgraph_router  # type: ignore  # noqa: E402 - Dynamic import after sys.path modification
 
                 if hasattr(langgraph_router, 'route_to_langgraph'):
                     original_route = langgraph_router.route_to_langgraph

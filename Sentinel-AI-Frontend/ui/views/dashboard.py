@@ -1,55 +1,53 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFrame, QMessageBox, QFileDialog, QSpacerItem, QSizePolicy,
-    QGridLayout, QStackedWidget
+    QFrame, QMessageBox, QGridLayout, QSizePolicy, QScrollArea
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QPixmap, QFont, QIcon
+from PyQt5.QtCore import Qt, QSize, QTimer
+from PyQt5.QtGui import QPixmap, QFont
+import qtawesome as qta
 import os
 from auth.session_manager import SessionManager
-
-from services.service_manager import ServiceManager
-from concurrent.futures import Future, ThreadPoolExecutor
-from services.meet_service import MeetService
 from database.user_service import UserService
-import logging
-from concurrent.futures import ThreadPoolExecutor
-from ui.views.logs_page import LogsPage
 
-logging.basicConfig(level=logging.DEBUG)
 
 class DashboardPage(QWidget):
-    # signal emitted from worker thread -> handled on main thread
-    service_result = pyqtSignal(str, bool, str)
-
     def __init__(self, main_app=None, username=None):
         super().__init__()
 
+        try:
+            self._initialize_dashboard(main_app, username)
+        except Exception as e:
+            import traceback
+            print("=" * 60)
+            print("❌ DASHBOARD INITIALIZATION ERROR:")
+            print("=" * 60)
+            traceback.print_exc()
+            print("=" * 60)
+            QMessageBox.critical(self, "Dashboard Error", f"Failed to load dashboard:\n\n{str(e)}")
+            if main_app:
+                main_app.show_login()
+
+    def _initialize_dashboard(self, main_app=None, username=None):
+        """Main initialization logic (wrapped for error handling)"""
         self.main_app = main_app
-        self.username = username
-        self.service_manager = ServiceManager()
+        self.username = username or "User"
 
         # Check if user is logged in using SessionManager
-        if not self.username or not SessionManager.is_logged_in(self.username):
+        if not SessionManager.is_logged_in(self.username):
             QMessageBox.critical(self, "Access Denied", "Your session has expired or you're not logged in.")
             if self.main_app:
-                self.main_app.show_login()  
+                self.main_app.show_login()
             return
 
-        self.setObjectName("dashboard")
+        self.setObjectName("dashboardPage")
         qss_path = os.path.join(os.path.dirname(__file__), "..", "qss", "dashboard.qss")
-        with open(qss_path, "r") as f:
-            self.setStyleSheet(f.read())
+        try:
+            with open(qss_path, "r") as f:
+                self.setStyleSheet(f.read())
+        except Exception as e:
+            print(f"Failed to load dashboard.qss: {e}")
 
-        # Initialize responsive variables
-        self.is_compact_mode = False
-
-        # Background executor and service instance
-        self._executor = ThreadPoolExecutor(max_workers=2)
-        self._service_status_labels = {}   # map service name -> QLabel
-        self._logger = logging.getLogger(__name__)
-
-        # Fetch user_id from MongoDB for token linking
+        # Fetch user_id from MongoDB
         self.user_id = None
         try:
             user_service = UserService()
@@ -57,598 +55,466 @@ class DashboardPage(QWidget):
             if db_user and '_id' in db_user:
                 self.user_id = str(db_user['_id'])
                 print(f"✅ Dashboard: Fetched user_id: {self.user_id}")
-            else:
-                print(f"⚠️ Dashboard: User not found in MongoDB")
         except Exception as e:
             print(f"⚠️ Dashboard: Failed to fetch user_id: {e}")
 
-        # Create MeetService with user_id
-        self._meet_service = MeetService(user_id=self.user_id)
+        # Define services list (will be used for dynamic counts)
+        self.services = [
+            ("Google Workspace", "Gmail, Drive, Calendar, and more", "fa5b.google", True),  # Only this is connected
+            ("Zoom", "Video conferencing and meetings", "fa5s.video", False),
+            ("Slack", "Team messaging and collaboration", "fa5b.slack", False),
+            ("Microsoft Teams", "Chat, meetings, and collaboration", "fa5b.microsoft", False),
+            ("YouTube Music", "Music streaming and playlists", "fa5b.youtube", False),
+            ("Spotify", "Music and podcast streaming", "fa5b.spotify", False)
+        ]
 
-        # Connect the service_result signal to the _on_service_result slot
-        self.service_result.connect(self._on_service_result)
-        self.home_content = None
-        self.logs_page = None
+        # Backend status tracking
+        self.backend_status = "Backend Not Connected"
+        self.backend_color = "#6b7280"  # Gray for not connected
+        self.comm_bus = None  # Initialize to None
 
-        self.logs_page = LogsPage()
-        self.setup_layout()
+        # Try to get backend status from communication bus (optional)
+        try:
+            import sys
+            # Calculate integration path relative to project root
+            # dashboard.py is at: Sentinel-AI-Frontend/ui/views/dashboard.py
+            # integration is at: integration/ (sibling of Sentinel-AI-Frontend)
 
-    def setup_layout(self):
-        """Setup the main layout"""
-        main_layout = QVBoxLayout(self)
+            # Get the project root (3 levels up from dashboard.py)
+            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # .../ui/views
+            frontend_dir = os.path.dirname(os.path.dirname(current_file_dir))  # .../Sentinel-AI-Frontend
+            project_root = os.path.dirname(frontend_dir)  # .../Sentinel-AI-Desktop
+            integration_path = os.path.join(project_root, "integration")
+
+            print(f"🔍 Looking for communication.py at: {integration_path}")
+
+            if os.path.exists(integration_path):
+                if integration_path not in sys.path:
+                    sys.path.insert(0, integration_path)
+                    print(f"✅ Added to sys.path: {integration_path}")
+
+                from communication import CommunicationBus, BackendStatus
+                self.comm_bus = CommunicationBus()
+
+                # DON'T assume status - wait for backend to report it
+                self.backend_status = "Connecting to backend..."
+                self.backend_color = "#f59e0b"  # Orange (waiting for status)
+
+                # Set up timer for status updates
+                self.backend_status_timer = QTimer()
+                self.backend_status_timer.timeout.connect(self.update_backend_status)
+                self.backend_status_timer.start(100)  # Check every 100ms (faster initially)
+
+                # Do an immediate status check
+                QTimer.singleShot(10, self.update_backend_status)
+
+                print("✅ Dashboard: Connected to backend communication bus - waiting for status...")
+            else:
+                print(f"⚠️ Integration path not found: {integration_path}")
+                self.comm_bus = None
+
+        except ImportError as e:
+            print(f"ℹ️ Backend communication not available (import error): {e}")
+            import traceback
+            traceback.print_exc()
+            self.comm_bus = None
+        except Exception as e:
+            print(f"⚠️ Could not connect to backend communication bus: {e}")
+            import traceback
+            traceback.print_exc()
+            self.comm_bus = None
+
+        # Main horizontal layout (sidebar + content)
+        main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        # ----- Top Section -----
-        top_section = QHBoxLayout()
-        top_section.setContentsMargins(0, 0, 0, 0)
-        # Enhanced Sidebar (unchanged)
-        sidebar = self.create_enhanced_sidebar()
-        top_section.addWidget(sidebar)
-        # ----- Main Content with Page Switching -----
-        # Create stacked widget for different pages
-        self.content_stack = QStackedWidget()
-        
-        # Create home page as a separate widget
-        home_page = QWidget()
-        content_wrapper = QVBoxLayout(home_page)
-        content_wrapper.setContentsMargins(25, 25, 25, 15)
-        content_wrapper.setSpacing(25)
-        # Add existing home content (keep all existing content)
-        header_section = self.create_dashboard_header()
-        content_wrapper.addWidget(header_section)
-        stats_section = self.create_statistics_section()
-        content_wrapper.addWidget(stats_section)
-        quick_actions = self.create_quick_actions_section()
-        content_wrapper.addWidget(quick_actions)
-        connection_section = self.create_responsive_connection_section()
-        content_wrapper.addWidget(connection_section)
-        content_wrapper.addStretch(1)
-        # Store home content and create logs page
-        self.home_content = home_page
-        self.logs_page = LogsPage()
-        
-        # Add pages to stack
-        self.content_stack.addWidget(self.home_content)
-        self.content_stack.addWidget(self.logs_page)
-        
-        # Show home page by default
-        self.content_stack.setCurrentWidget(self.home_content)
-        # Add stacked widget to layout
-        top_section.addWidget(self.content_stack)
-        main_layout.addLayout(top_section)
 
-    def resizeEvent(self, event):
-        """Handle window resize events for responsive design"""
-        super().resizeEvent(event)
-        current_width = self.width()
-        should_be_compact = current_width < 1200
+        # ===== LEFT SIDEBAR =====
+        sidebar = self.create_sidebar()
+        main_layout.addWidget(sidebar)
 
-        if should_be_compact != self.is_compact_mode:
-            self.is_compact_mode = should_be_compact
-            # Just adjust some basic responsive elements without full rebuild
-            self.adjust_responsive_elements()
+        # ===== MAIN CONTENT AREA =====
+        content_area = self.create_content_area()
+        main_layout.addWidget(content_area)
 
-    def adjust_responsive_elements(self):
-        """Adjust elements for responsive behavior without rebuilding"""
-        # Find and adjust sidebar width if it exists
-        sidebar = self.findChild(QFrame, "sidebar")
-        if sidebar:
-            sidebar_width = 200 if self.is_compact_mode else 250
-            sidebar.setFixedWidth(sidebar_width)
-
-    def create_enhanced_sidebar(self):
-        """Create an enhanced sidebar with icons and better styling"""
+    def create_sidebar(self):
+        """Create the left navigation sidebar"""
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(250)
+        sidebar.setFixedWidth(200)
 
-        main_layout = QVBoxLayout(sidebar)
-        main_layout.setContentsMargins(15, 20, 15, 20)
-        main_layout.setSpacing(15)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(16, 24, 16, 24)
+        sidebar_layout.setSpacing(24)
+        sidebar_layout.setAlignment(Qt.AlignTop)
 
-        # Header Section
-        header_layout = QHBoxLayout()
-        logo_label = QLabel()
-        # Try to load logo, fallback to shield emoji if not found
-        logo_path = "icons/sentinel_logo.png"
-        if os.path.exists(logo_path):
-            logo_label.setPixmap(QPixmap(logo_path).scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            logo_label.setText("🛡️")
-            logo_label.setStyleSheet("font-size: 24px;")
-        logo_label.setObjectName("logo_label")
+        # App branding
+        app_title = QLabel("Sentinel-AI")
+        app_title.setObjectName("appTitle")
+        sidebar_layout.addWidget(app_title)
 
-        title_label = QLabel("Sentinel AI")
-        title_label.setObjectName("title_label")
+        # Greeting
+        greeting = QLabel(f"Hey, {self.username}! 👋")
+        greeting.setObjectName("greeting")
+        sidebar_layout.addWidget(greeting)
 
-        header_layout.addWidget(logo_label)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch(1)
+        sidebar_layout.addSpacing(20)
 
-        # Dashboard Title
-        dashboard_title = QLabel("AI SECURITY DASHBOARD")
-        dashboard_title.setObjectName("dashboard_title")
-        dashboard_title.setAlignment(Qt.AlignLeft)
-        dashboard_title.setContentsMargins(0, 10, 0, 5)
+        # Navigation menu
+        nav_items = [
+            ("Dashboard", "fa5s.th-large", True),
+            ("Home", "fa5s.home", False),
+            ("Settings", "fa5s.cog", False)
+        ]
 
-        # Navigation Section
-        navigation_frame = QFrame()
-        navigation_frame.setObjectName("navigation_frame")
-        navigation_layout = QVBoxLayout(navigation_frame)
-        navigation_layout.setContentsMargins(0, 0, 0, 0)
-        navigation_layout.setSpacing(10)
+        for label, icon_name, is_active in nav_items:
+            btn = self.create_nav_button(label, icon_name, is_active)
+            sidebar_layout.addWidget(btn)
 
-        # Navigation Buttons
-        self.home_button = QPushButton("Home")
-        self.home_button.setObjectName("home_button")
-        icon_path = "icons/home_icon.png"
-        if os.path.exists(icon_path):
-            self.home_button.setIcon(QIcon(icon_path))
-        self.home_button.setCheckable(True)
-        self.home_button.setChecked(True)
-        self.home_button.clicked.connect(lambda: self.handle_sidebar_click("home"))
+        # Push everything down
+        sidebar_layout.addStretch()
 
-        self.tasks_button = QPushButton("Tasks")
-        self.tasks_button.setObjectName("tasks_button")
-        icon_path = "icons/tasks_icon.png"
-        if os.path.exists(icon_path):
-            self.tasks_button.setIcon(QIcon(icon_path))
-        self.tasks_button.clicked.connect(lambda: self.handle_sidebar_click("tasks"))
-
-        self.agents_button = QPushButton("Agents")
-        self.agents_button.setObjectName("agents_button")
-        icon_path = "icons/agents_icon.png"
-        if os.path.exists(icon_path):
-            self.agents_button.setIcon(QIcon(icon_path))
-        self.agents_button.clicked.connect(lambda: self.handle_sidebar_click("agents"))
-
-        self.settings_button = QPushButton("Settings")
-        self.settings_button.setObjectName("settings_button")
-        icon_path = "icons/settings_icon.png"
-        if os.path.exists(icon_path):
-            self.settings_button.setIcon(QIcon(icon_path))
-        self.settings_button.clicked.connect(lambda: self.handle_sidebar_click("settings"))
-        self.settings_button.clicked.connect(lambda: self.handle_sidebar_click("settings"))
-        self.logs_button = QPushButton("Logs")
-        self.logs_button.setObjectName("logs_button")
-        icon_path = "icons/logs_icon.png"
-        if os.path.exists(icon_path):
-            self.logs_button.setIcon(QIcon(icon_path))
-        # Added the missing ')' at the end
-        self.logs_button.clicked.connect(lambda: self.handle_sidebar_click("logs"))
-        navigation_layout.addWidget(self.home_button)
-        navigation_layout.addWidget(self.tasks_button)
-        navigation_layout.addWidget(self.agents_button)
-        navigation_layout.addWidget(self.logs_button)
-        navigation_layout.addWidget(self.settings_button)
-
-        # User Section
-        user_frame = QFrame()
-        user_frame.setObjectName("user_frame")
-        user_layout = QVBoxLayout(user_frame)
-        user_layout.setContentsMargins(0, 0, 0, 0)
-        user_layout.setSpacing(10)
-
-        user_name_button = QPushButton(self.username.title() if self.username else "User")
-        user_name_button.setObjectName("user_name_button")
-        icon_path = "icons/user_icon.png"
-        if os.path.exists(icon_path):
-            user_name_button.setIcon(QIcon(icon_path))
-        user_name_button.setDisabled(True)
-
-        my_profile_button = QPushButton("My Profile")
-        my_profile_button.setObjectName("my_profile_button")
-        if os.path.exists(icon_path):
-            my_profile_button.setIcon(QIcon(icon_path))
-
-        user_layout.addWidget(user_name_button)
-        user_layout.addWidget(my_profile_button)
-
-        # Logout Button
-        logout_button = QPushButton("Logout")
-        logout_button.setObjectName("logout_button")
-        icon_path = "icons/logout_icon.png"
-        if os.path.exists(icon_path):
-            logout_button.setIcon(QIcon(icon_path))
-        logout_button.clicked.connect(self.logout_user)
-
-        # Add all sections to the main layout
-        main_layout.addLayout(header_layout)
-        main_layout.addWidget(dashboard_title)
-        main_layout.addWidget(navigation_frame)
-        main_layout.addStretch(1)
-        main_layout.addWidget(user_frame)
-        main_layout.addWidget(logout_button)
+        # User profile card at bottom
+        profile_card = self.create_profile_card()
+        sidebar_layout.addWidget(profile_card)
 
         return sidebar
 
-    def create_dashboard_header(self):
-        """Create the dashboard header with welcome message and system status"""
-        header_frame = QFrame()
-        header_frame.setObjectName("dashboard_header")
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(20, 15, 20, 15)
+    def create_nav_button(self, label, icon_name, is_active=False):
+        """Create a navigation button with icon"""
+        btn = QPushButton(f"  {label}")
+        btn.setObjectName("navBtnActive" if is_active else "navBtn")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedHeight(40)
 
-        # Welcome section
-        welcome_layout = QVBoxLayout()
-        welcome_title = QLabel(f"Welcome back, {self.username.title()}!")
-        welcome_title.setObjectName("welcome_title")
-        welcome_subtitle = QLabel("Monitor and manage your AI security systems")
-        welcome_subtitle.setObjectName("welcome_subtitle")
+        try:
+            icon = qta.icon(icon_name, color='#ffffff' if is_active else '#94a3b8', scale_factor=0.9)
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(16, 16))
+        except:
+            pass
 
-        welcome_layout.addWidget(welcome_title)
-        welcome_layout.addWidget(welcome_subtitle)
-        welcome_layout.addStretch()
+        return btn
 
-        # System status indicator
-        status_layout = QVBoxLayout()
-        status_layout.setAlignment(Qt.AlignRight | Qt.AlignCenter)
+    def create_profile_card(self):
+        """Create user profile card at bottom of sidebar"""
+        profile_card = QFrame()
+        profile_card.setObjectName("profileCard")
 
-        system_status = QLabel("🟢 All Systems Operational")
-        system_status.setObjectName("system_status")
-        system_status.setAlignment(Qt.AlignRight)
+        profile_layout = QHBoxLayout(profile_card)
+        profile_layout.setContentsMargins(12, 12, 12, 12)
+        profile_layout.setSpacing(10)
 
-        status_layout.addWidget(system_status)
+        # Get user data from database
+        try:
+            user_service = UserService()
+            user_data = user_service.get_user_by_username(self.username)
+            fullname = user_data.get("fullname", self.username) if user_data else self.username
+            email = user_data.get("email", "user@example.com") if user_data else "user@example.com"
+        except:
+            fullname = self.username
+            email = "user@example.com"
 
-        header_layout.addLayout(welcome_layout)
+        # Avatar circle with first letter of name
+        avatar_letter = fullname[0].upper() if fullname else "U"
+        avatar = QLabel(avatar_letter)
+        avatar.setObjectName("avatar")
+        avatar.setFixedSize(40, 40)
+        avatar.setAlignment(Qt.AlignCenter)
+        profile_layout.addWidget(avatar)
+
+        # Name and email in vertical layout
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+
+        name_label = QLabel(fullname)
+        name_label.setObjectName("profileName")
+        name_label.setWordWrap(False)
+
+        email_label = QLabel(email)
+        email_label.setObjectName("profileEmail")
+        email_label.setWordWrap(False)
+
+        info_layout.addWidget(name_label)
+        info_layout.addWidget(email_label)
+
+        profile_layout.addLayout(info_layout)
+
+        # Add logout button (clickable)
+        profile_card.mousePressEvent = lambda event: self.logout_user()
+        profile_card.setCursor(Qt.PointingHandCursor)
+
+        return profile_card
+
+    def create_content_area(self):
+        """Create the main content area with dashboard content"""
+        content_widget = QWidget()
+        content_widget.setObjectName("contentArea")
+
+        # Create scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setObjectName("scrollArea")
+
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(40, 30, 40, 30)
+        content_layout.setSpacing(24)
+
+        # Header section
+        header_layout = QHBoxLayout()
+
+        # Title and subtitle
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(4)
+
+        dashboard_title = QLabel("Dashboard")
+        dashboard_title.setObjectName("dashboardTitle")
+
+        dashboard_subtitle = QLabel("Manage and monitor your connected services")
+        dashboard_subtitle.setObjectName("dashboardSubtitle")
+
+        title_layout.addWidget(dashboard_title)
+        title_layout.addWidget(dashboard_subtitle)
+
+        header_layout.addLayout(title_layout)
         header_layout.addStretch()
-        header_layout.addLayout(status_layout)
 
-        return header_frame
+        # Status badge (dynamic, will be updated by timer)
+        self.status_badge = QLabel(f"● {self.backend_status}")
+        self.status_badge.setObjectName("statusBadge")
+        self.status_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-    def create_statistics_section(self):
-        """Create statistics cards showing key metrics"""
-        stats_frame = QFrame()
-        stats_frame.setObjectName("stats_section")
-
-        # Use grid layout for responsive design
-        if self.is_compact_mode:
-            # 2x2 grid for compact mode
-            stats_layout = QGridLayout(stats_frame)
-            stats_layout.setSpacing(15)
-            cols = 2
-        else:
-            # Horizontal layout for normal mode
-            stats_layout = QHBoxLayout(stats_frame)
-            stats_layout.setSpacing(20)
-            cols = 4
-
-        stats_layout.setContentsMargins(0, 0, 0, 0) 
-
-    def create_quick_actions_section(self):
-        """Create quick action buttons for common tasks"""
-        actions_frame = QFrame()
-        actions_frame.setObjectName("quick_actions")
-        actions_layout = QVBoxLayout(actions_frame)
-        actions_layout.setContentsMargins(20, 15, 20, 15)
-        actions_layout.setSpacing(15)
-
-        # Section title
-        title = QLabel("Quick Actions")
-        title.setObjectName("section_title")
-        actions_layout.addWidget(title)
-
-        # Action buttons row
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(15)
-
-        action_buttons = [
-            ("🚀", "Run Full Scan", "scan_btn"),
-            ("📁", "Upload File", "upload_btn"),
-            ("📊", "Generate Report", "report_btn"),
-            ("⚙️", "System Settings", "settings_btn")
-        ]
-
-        for icon, text, btn_id in action_buttons:
-            btn = QPushButton(f"{icon}  {text}")
-            btn.setObjectName(btn_id)
-            btn.setCursor(Qt.PointingHandCursor)
-            if btn_id == "upload_btn":
-                btn.clicked.connect(self.open_file)
-            buttons_layout.addWidget(btn)
-
-        actions_layout.addLayout(buttons_layout)
-        return actions_frame
-
-
-    def create_responsive_connection_section(self):
-        """Create responsive connection panel with better styling"""
-        connection_frame = QFrame()
-        connection_frame.setObjectName("connection_section")
-        connection_layout = QVBoxLayout(connection_frame)
-        padding = 18 if self.is_compact_mode else 24
-        connection_layout.setContentsMargins(padding, 20, padding, 20)
-        connection_layout.setSpacing(18 if self.is_compact_mode else 22)
-
-        # Section header with title and description
-        header_layout = QVBoxLayout()
-        header_layout.setSpacing(8)
-
-        title = QLabel("Connected Services")
-        title.setObjectName("section_title")
-
-        subtitle = QLabel("Manage your integrated applications and services")
-        subtitle.setObjectName("section_subtitle")
-        subtitle.setStyleSheet("""
-            color: #9ca3af;
-            font-size: 13px;
-            font-weight: 400;
-            margin-bottom: 5px;
+        # Apply initial styling based on color
+        self.status_badge.setStyleSheet(f"""
+            background-color: {self.backend_color}20;
+            color: {self.backend_color};
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 500;
         """)
 
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
-        connection_layout.addLayout(header_layout)
+        header_layout.addWidget(self.status_badge)
 
-        # Services in responsive grid
-        services_frame = QWidget()
-        if self.is_compact_mode:
-            # 2 columns for compact mode
-            services_layout = QGridLayout(services_frame)
-            services_layout.setSpacing(15)
-            cols = 2
-        else:
-            # 3 columns for normal mode
-            services_layout = QGridLayout(services_frame)
-            services_layout.setSpacing(20)
-            cols = 3
+        content_layout.addLayout(header_layout)
 
-        # Get base path for icons (relative to this file)
-        base_path = os.path.join(os.path.dirname(__file__), "..", "assests")
+        # Stats cards row - 2 cards (DYNAMIC)
+        stats_layout = QHBoxLayout()
+        stats_layout.setSpacing(16)
 
-        services = [
-            ("Zoom", os.path.join(base_path, "zoom.webp"), "🎥"),
-            ("Gmail", os.path.join(base_path, "gmail.webp"), "📧"),
-            ("GMeet", os.path.join(base_path, "gmeet.webp"), "👥"),
-            ("Spotify", os.path.join(base_path, "spotify.webp"), "🎵"),
-            ("YouTube", os.path.join(base_path, "youtube.webp"), "📺"),
-            ("Discord", os.path.join(base_path, "discord.webp"), "💬"),
+        # Calculate dynamic values
+        total_services = len(self.services)
+        connected_services = sum(1 for _, _, _, is_active in self.services if is_active)
+
+        stats_data = [
+            ("Total Services", str(total_services), False),
+            ("Connected Services", str(connected_services), True)
         ]
 
-        for i, (service, icon_path, fallback_icon) in enumerate(services):
-            service_card = QFrame()
-            service_card.setObjectName("service_card")
-            card_layout = QVBoxLayout(service_card)
-            card_padding = 16 if self.is_compact_mode else 20
-            card_layout.setContentsMargins(card_padding, 20, card_padding, 20)
-            card_layout.setSpacing(12)
-            card_layout.setAlignment(Qt.AlignCenter)
+        for title, value, is_green in stats_data:
+            card = self.create_stat_card(title, value, is_green)
+            stats_layout.addWidget(card)
 
-            # Service icon with container
-            icon_container = QFrame()
-            icon_container.setFixedSize(64, 64)
-            icon_container.setStyleSheet("""
-                QFrame {
-                    background: rgba(79, 70, 229, 0.1);
-                    border-radius: 32px;
-                    border: 2px solid rgba(79, 70, 229, 0.2);
+        # Add stretch to left-align the cards
+        stats_layout.addStretch()
+
+        content_layout.addLayout(stats_layout)
+
+        # Communication section
+        comm_label = QLabel("Communication")
+        comm_label.setObjectName("sectionTitle")
+        content_layout.addWidget(comm_label)
+
+        # Service cards grid (DYNAMIC - uses self.services)
+        service_grid = QGridLayout()
+        service_grid.setSpacing(16)
+        service_grid.setHorizontalSpacing(16)
+        service_grid.setVerticalSpacing(16)
+
+        # Use the dynamic services list
+        row, col = 0, 0
+        for service_name, description, icon_name, is_active in self.services:
+            card = self.create_service_card(service_name, description, icon_name, is_active)
+            service_grid.addWidget(card, row, col)
+            col += 1
+            if col > 2:  # 3 columns
+                col = 0
+                row += 1
+
+        content_layout.addLayout(service_grid)
+        content_layout.addStretch()
+
+        scroll.setWidget(content_widget)
+
+        # Wrap scroll in a layout
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.addWidget(scroll)
+
+        return wrapper
+
+    def create_stat_card(self, title, value, is_green=False):
+        """Create a statistics card"""
+        card = QFrame()
+        card.setObjectName("statCard")
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        card.setFixedHeight(90)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 16, 20, 16)
+        card_layout.setSpacing(8)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("statTitle")
+
+        value_label = QLabel(value)
+        value_label.setObjectName("statValueGreen" if is_green else "statValue")
+
+        card_layout.addWidget(title_label)
+        card_layout.addWidget(value_label)
+
+        return card
+
+    def create_service_card(self, service_name, description, icon_name, is_active=False):
+        """Create a service integration card"""
+        card = QFrame()
+        card.setObjectName("serviceCardActive" if is_active else "serviceCard")
+        card.setMinimumSize(180, 200)
+        card.setMaximumWidth(240)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        card_layout.setSpacing(12)
+
+        # Icon and badge row
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+
+        # Icon container
+        icon_container = QFrame()
+        icon_container.setObjectName("iconContainer")
+        icon_container.setFixedSize(48, 48)
+
+        icon_layout = QHBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_layout.setAlignment(Qt.AlignCenter)
+
+        # Icon
+        icon_label = QLabel()
+        icon_label.setAlignment(Qt.AlignCenter)
+        try:
+            icon = qta.icon(icon_name, color='#475569', scale_factor=1.2)
+            pixmap = icon.pixmap(28, 28)
+            icon_label.setPixmap(pixmap)
+        except Exception as e:
+            print(f"Icon error for {service_name}: {e}")
+            icon_label.setText("●")
+            icon_label.setStyleSheet("color: #475569; font-size: 24px;")
+
+        icon_layout.addWidget(icon_label)
+        top_row.addWidget(icon_container, alignment=Qt.AlignLeft)
+        top_row.addStretch()
+
+        # Active badge (if active)
+        if is_active:
+            badge = QLabel("Active")
+            badge.setObjectName("activeBadge")
+            top_row.addWidget(badge)
+
+        card_layout.addLayout(top_row)
+
+        # Service name
+        name_label = QLabel(service_name)
+        name_label.setObjectName("serviceName")
+        name_label.setWordWrap(True)
+        card_layout.addWidget(name_label)
+
+        # Description
+        desc_label = QLabel(description)
+        desc_label.setObjectName("serviceDescription")
+        desc_label.setWordWrap(True)
+        card_layout.addWidget(desc_label)
+
+        card_layout.addStretch()
+
+        # Connect/Disconnect button
+        btn_text = "Disconnect" if is_active else "Connect"
+        action_btn = QPushButton(btn_text)
+        action_btn.setObjectName("disconnectBtn" if is_active else "connectBtn")
+        action_btn.setCursor(Qt.PointingHandCursor)
+        action_btn.setFixedHeight(36)
+        card_layout.addWidget(action_btn)
+
+        return card
+
+    def update_backend_status(self):
+        """Update backend status from communication bus"""
+        if not self.comm_bus:
+            return
+
+        try:
+            from communication import MessageType, BackendStatus
+
+            # Check for messages from backend
+            message = self.comm_bus.get_frontend_message()
+            if not message:
+                return
+
+            if message.type == MessageType.STATUS_UPDATE:
+                # Update status based on backend status
+                status_map = {
+                    BackendStatus.STARTING: ("Starting...", "#f59e0b"),  # Orange
+                    BackendStatus.READY: ("Ready", "#10b981"),  # Green
+                    BackendStatus.LISTENING: ("Listening for 'Sentinel'", "#10b981"),  # Green
+                    BackendStatus.PROCESSING: ("Processing...", "#3b82f6"),  # Blue
+                    BackendStatus.ERROR: ("Error", "#ef4444"),  # Red
+                    BackendStatus.STOPPED: ("Stopped", "#6b7280"),  # Gray
                 }
-            """)
-            icon_container_layout = QVBoxLayout(icon_container)
-            icon_container_layout.setContentsMargins(0, 0, 0, 0)
-            icon_container_layout.setAlignment(Qt.AlignCenter)
 
-            icon_label = QLabel()
-            icon_size = 36
-            if os.path.exists(icon_path):
-                icon_pixmap = QPixmap(icon_path).scaled(icon_size, icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                icon_label.setPixmap(icon_pixmap)
-            else:
-                icon_label.setText(fallback_icon)
-                icon_label.setStyleSheet(f"font-size: {icon_size-4}px;")
-            icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setObjectName("service_icon")
-            icon_container_layout.addWidget(icon_label)
+                if message.status in status_map:
+                    self.backend_status, self.backend_color = status_map[message.status]
+                    self.status_badge.setText(f"● {self.backend_status}")
+                    self.status_badge.setStyleSheet(f"""
+                        background-color: {self.backend_color}20;
+                        color: {self.backend_color};
+                        border-radius: 20px;
+                        padding: 6px 14px;
+                        font-size: 12px;
+                        font-weight: 500;
+                    """)
 
-            # Service name
-            name_label = QLabel(service)
-            name_label.setObjectName("service_name")
-            name_label.setAlignment(Qt.AlignCenter)
-
-            # Status indicator with better styling
-            status_label = QLabel("Disconnected")
-            status_label.setObjectName("service_status")
-            status_label.setAlignment(Qt.AlignCenter)
-            status_label.setStyleSheet("""
-                QLabel {
-                    background: rgba(239, 68, 68, 0.15);
-                    border: 1px solid rgba(239, 68, 68, 0.3);
-                    border-radius: 12px;
+            elif message.type == MessageType.WAKE_WORD_DETECTED:
+                self.backend_status = "Wake word detected!"
+                self.backend_color = "#8b5cf6"  # Purple
+                self.status_badge.setText(f"● {self.backend_status}")
+                self.status_badge.setStyleSheet(f"""
+                    background-color: {self.backend_color}20;
+                    color: {self.backend_color};
+                    border-radius: 20px;
                     padding: 6px 14px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    color: #ef4444;
-                }
-            """)
+                    font-size: 12px;
+                    font-weight: 500;
+                """)
 
-            # store label by service name (reliable lookup)
-            self._service_status_labels[service] = status_label
+            elif message.type == MessageType.COMMAND_RECEIVED:
+                self.backend_status = f"Command: {message.data or 'processing'}"
+                self.backend_color = "#3b82f6"  # Blue
+                self.status_badge.setText(f"● {self.backend_status}")
 
-            # Action buttons with better spacing
-            button_layout = QHBoxLayout()
-            button_layout.setSpacing(8)
-
-            connect_btn = QPushButton("Connect")
-            connect_btn.setObjectName("connect_btn")
-            connect_btn.setCursor(Qt.PointingHandCursor)
-            connect_btn.setProperty("service", service)
-            connect_btn.setProperty("status_label", status_label)
-            connect_btn.clicked.connect(self.on_connect_clicked)
-
-            disconnect_btn = QPushButton("Disconnect")
-            disconnect_btn.setObjectName("disconnect_btn")
-            disconnect_btn.setCursor(Qt.PointingHandCursor)
-            disconnect_btn.setProperty("service", service)
-            disconnect_btn.setProperty("status_label", status_label)
-            disconnect_btn.clicked.connect(self.on_disconnect_clicked)
-
-            button_layout.addWidget(connect_btn)
-            button_layout.addWidget(disconnect_btn)
-
-            card_layout.addWidget(icon_container, 0, Qt.AlignCenter)
-            card_layout.addSpacing(4)
-            card_layout.addWidget(name_label)
-            card_layout.addWidget(status_label)
-            card_layout.addSpacing(8)
-            card_layout.addLayout(button_layout)
-
-            # Add to grid
-            row = i // cols
-            col = i % cols
-            services_layout.addWidget(service_card, row, col)
-
-        connection_layout.addWidget(services_frame)
-        return connection_frame
-
-
-    def handle_sidebar_click(self, button_name):
-        """Handle sidebar button clicks"""
-        # Reset all button states first
-        self.home_button.setChecked(False)
-        self.tasks_button.setChecked(False)
-        self.agents_button.setChecked(False)
-        self.settings_button.setChecked(False)
-
-        # Set clicked button as active
-        if button_name == "home":
-            self.home_button.setChecked(True)
-            print("🏠 Home clicked")
-        elif button_name == "tasks":
-            self.tasks_button.setChecked(True)
-            print("📋 Tasks clicked")
-        elif button_name == "agents":
-            self.agents_button.setChecked(True)
-            print("🤖 Agents clicked")
-        elif button_name == "logs":  # ADD THIS BLOCK
-            self.logs_button.setChecked(True)
-            self.content_stack.setCurrentWidget(self.logs_page)
-            print("📋 Logs clicked")
-        elif button_name == "settings":
-            self.settings_button.setChecked(True)
-            print("⚙️ Settings clicked")
+        except Exception as e:
+            print(f"⚠️ Error updating backend status: {e}")
 
     def logout_user(self):
+        """Handle user logout"""
+        # Stop backend status timer if active
+        if hasattr(self, 'backend_status_timer'):
+            self.backend_status_timer.stop()
+
         if self.username:
-            SessionManager.delete_session(self.username)  
+            SessionManager.delete_session(self.username)
         if self.main_app:
             self.main_app.show_login()
-
-    def open_file(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Select File")
-        if file_name:
-            print("Training agent on file:", file_name)
-
-    def on_connect_clicked(self):
-        sender = self.sender()
-        service = sender.property("service")
-        label = self._service_status_labels.get(service)
-        self._logger.debug("Connect clicked for service=%s label=%s", service, bool(label))
-        if label:
-            label.setText("Connecting...")
-            label.setStyleSheet("""
-                QLabel {
-                    background: rgba(245, 158, 11, 0.15);
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                    border-radius: 12px;
-                    padding: 6px 14px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    color: #f59e0b;
-                }
-            """)
-            label.repaint()
-        self._logger.debug("Registered service keys: %s", list(self._service_status_labels.keys()))
-
-        if service == "GMeet":
-            future = self._executor.submit(self._meet_service.connect)
-        else:
-            future = self._executor.submit(lambda: (True, "Connected (placeholder)"))
-
-        def _done(fut, svc=service):
-            try:
-                ok, message = fut.result()
-            except Exception as exc:
-                ok, message = False, str(exc)
-            self._logger.debug("Worker finished for %s ok=%s msg=%s", svc, ok, message)
-            # emit Qt signal — safe across threads
-            try:
-                self.service_result.emit(svc, ok, message)
-            except Exception:
-                self._logger.exception("Failed emitting service_result for %s", svc)
-
-        future.add_done_callback(_done)
-
-    @pyqtSlot(str, bool, str)
-    def _on_service_result(self, service: str, ok: bool, message: str):
-        self._logger.debug("_on_service_result called service=%s ok=%s", service, ok)
-        label = self._service_status_labels.get(service)
-        if label:
-            if ok:
-                label.setText("Connected")
-                label.setStyleSheet("""
-                    QLabel {
-                        background: rgba(16, 185, 129, 0.15);
-                        border: 1px solid rgba(16, 185, 129, 0.3);
-                        border-radius: 12px;
-                        padding: 6px 14px;
-                        font-size: 11px;
-                        font-weight: 600;
-                        color: #10b981;
-                    }
-                """)
-            else:
-                label.setText("Error")
-                label.setStyleSheet("""
-                    QLabel {
-                        background: rgba(239, 68, 68, 0.15);
-                        border: 1px solid rgba(239, 68, 68, 0.3);
-                        border-radius: 12px;
-                        padding: 6px 14px;
-                        font-size: 11px;
-                        font-weight: 600;
-                        color: #ef4444;
-                    }
-                """)
-            label.repaint()
-            label.update()
-        else:
-            self._logger.warning("No status label found for service=%s", service)
-
-        if ok:
-            QMessageBox.information(self, service, message)
-        else:
-            QMessageBox.warning(self, f"{service} error", message)
-
-    def on_disconnect_clicked(self):
-        sender = self.sender()
-        service = sender.property("service")
-        label = self._service_status_labels.get(service)
-        if label:
-            label.setText("Disconnecting...")
-            label.setStyleSheet("""
-                QLabel {
-                    background: rgba(245, 158, 11, 0.15);
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                    border-radius: 12px;
-                    padding: 6px 14px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    color: #f59e0b;
-                }
-            """)
-        # Simple no-op disconnect for now
-        def _update():
-            if label:
-                label.setText("Disconnected")
-                label.setStyleSheet("""
-                    QLabel {
-                        background: rgba(239, 68, 68, 0.15);
-                        border: 1px solid rgba(239, 68, 68, 0.3);
-                        border-radius: 12px;
-                        padding: 6px 14px;
-                        font-size: 11px;
-                        font-weight: 600;
-                        color: #ef4444;
-                    }
-                """)
-        QTimer.singleShot(200, _update)
