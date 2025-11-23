@@ -54,6 +54,29 @@
     font-weight: 600;
 }
 
+/* Logout button */
+#logoutBtn {
+    background-color: transparent;
+    color: #ef4444;
+    border: 1px solid #ef4444;
+    border-radius: 6px;
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#logoutBtn:hover {
+    background-color: #ef4444;
+    color: #ffffff;
+    border-color: #ef4444;
+}
+
+#logoutBtn:pressed {
+    background-color: #dc2626;
+    border-color: #dc2626;
+}
+
 /* Profile card at bottom */
 #profileCard {
     background-color: #1e293b;

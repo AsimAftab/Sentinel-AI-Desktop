@@ -76,6 +76,17 @@ class LoginPage(QWidget):
         card_layout.setContentsMargins(35, 35, 35, 35)
         card_layout.setSpacing(12)
 
+        # App Icon
+        icon_label = QLabel()
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_path = os.path.join(os.path.dirname(__file__), "..", "assests", "icon.png")
+        if os.path.exists(icon_path):
+            icon_pixmap = QPixmap(icon_path)
+            scaled_pixmap = icon_pixmap.scaled(250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon_label.setPixmap(scaled_pixmap)
+        else:
+            print(f"Icon not found at: {icon_path}")
+
         # Card Header
         self.card_title = QLabel("Welcome Back")
         self.card_title.setObjectName("cardTitle")
@@ -226,6 +237,8 @@ class LoginPage(QWidget):
         signup_layout.addWidget(self.signup_link)
 
         # Add all elements to card layout
+        card_layout.addWidget(icon_label)
+        card_layout.addSpacing(8)
         card_layout.addWidget(self.card_title)
         card_layout.addWidget(self.card_subtitle)
         card_layout.addSpacing(12)
