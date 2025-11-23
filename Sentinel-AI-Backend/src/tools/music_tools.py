@@ -10,23 +10,26 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
+# Import user-specific Spotify authentication
+from src.utils.spotify_user_auth import get_user_spotify_client
+
 load_dotenv() # Load environment variables
 
 # --- Spotify API Setup ---
-# The scope defines the permissions our app requests.
-# "user-modify-playback-state" is needed to start/resume playback.
-# "user-read-playback-state" is needed to see what's currently playing.
-SCOPE = "user-modify-playback-state user-read-playback-state"
+# NOTE: Spotify authentication is now USER-SPECIFIC!
+# Each tool will fetch the appropriate Spotify client for the current user
+# using get_user_spotify_client() which reads from user_context.json and MongoDB
 
-# Authenticate with Spotify. This will now read credentials from your .env file.
-# It will still open a browser window for you to log in and grant
-# permissions the first time you run it.
-try:
-    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=SCOPE))
-except Exception as e:
-    print(f"Error authenticating with Spotify: {e}")
-    print("Please ensure your .env file exists in the project root and contains the correct Spotify credentials.")
-    sp = None
+def _get_spotify_client():
+    """
+    Get user-specific Spotify client.
+    Returns (sp_client, error_message) tuple.
+    """
+    sp = get_user_spotify_client()
+    if not sp:
+        return None, ("Spotify not connected. Please connect your Spotify account in the dashboard. "
+                      "Go to Dashboard -> Spotify -> Connect to authorize your account.")
+    return sp, None
 
 # --- Tool Definitions ---
 
@@ -36,8 +39,9 @@ def search_and_play_song(song_name: str, artist_name: str = None) -> str:
     Searches for a song on Spotify and plays it on the user's active device.
     You can optionally provide an artist's name to improve the search accuracy.
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         # Check for active devices
@@ -83,8 +87,9 @@ def next_song() -> str:
     """
     Skips to the next song in the current Spotify playlist or queue.
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         # Check for active devices
@@ -113,8 +118,9 @@ def previous_song() -> str:
     """
     Goes back to the previous song in the current Spotify playlist or queue.
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         # Check for active devices
@@ -143,8 +149,9 @@ def pause_music() -> str:
     """
     Pauses the currently playing music on Spotify.
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         # Check if something is currently playing
@@ -168,8 +175,9 @@ def resume_music() -> str:
     """
     Resumes the paused music on Spotify.
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         # Check current playback state
@@ -199,12 +207,13 @@ def resume_music() -> str:
 def set_volume(volume_percent: int) -> str:
     """
     Sets the volume of the Spotify playback.
-    
+
     Args:
         volume_percent: Volume level from 0 to 100
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         # Validate volume range
@@ -246,8 +255,9 @@ def get_current_song() -> str:
     """
     Gets information about the currently playing song on Spotify.
     """
+    sp, error = _get_spotify_client()
     if not sp:
-        return "Spotify authentication failed. Cannot perform this action."
+        return error
 
     try:
         current_playback = sp.current_playback()
@@ -362,7 +372,7 @@ def play_music_smart(song_name: str, artist_name: str = None, platform: str = "a
     """
     Smart music player that tries multiple platforms to play a song.
     First tries Spotify, then falls back to YouTube Music or YouTube.
-    
+
     Args:
         song_name: The name of the song to search for
         artist_name: Optional artist name to improve search accuracy
@@ -376,19 +386,20 @@ def play_music_smart(song_name: str, artist_name: str = None, platform: str = "a
             return play_on_youtube_music(song_name, artist_name)
         elif platform == "youtube":
             return play_on_youtube(song_name, artist_name)
-        
+
         # Auto mode: try Spotify first, then YouTube options
-        if sp:  # Spotify is available
+        sp, _ = _get_spotify_client()
+        if sp:  # Spotify is available for this user
             try:
                 result = search_and_play_song(song_name, artist_name)
-                if "error" not in result.lower() and "failed" not in result.lower():
+                if "error" not in result.lower() and "failed" not in result.lower() and "not connected" not in result.lower():
                     return result + " (via Spotify)"
             except:
                 pass
-        
+
         # If Spotify failed or unavailable, try auto-play YouTube
         return auto_play_youtube_song(song_name, artist_name)
-        
+
     except Exception as e:
         return f"Error in smart music player: {e}"
 
@@ -396,9 +407,8 @@ def play_music_smart(song_name: str, artist_name: str = None, platform: str = "a
 @tool
 def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
     """
-    [RECOMMENDED for existing browser] Automatically finds and plays a song on YouTube
-    by opening the direct video URL in your EXISTING browser.
-    Uses your default browser - NO new browser instance created!
+    Plays a song on REGULAR YOUTUBE (not YouTube Music) in your logged-in browser.
+    Opens YouTube in your existing browser where you're already signed in.
 
     Args:
         song_name: The name of the song to search for
@@ -438,13 +448,13 @@ def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
             # Construct direct YouTube video URL with autoplay
             video_url = f"https://www.youtube.com/watch?v={first_video_id}&autoplay=1"
 
-            # Open in EXISTING default browser (reuses open browser)
+            # Open in EXISTING default browser (where user is logged in)
             webbrowser.open(video_url)
 
             if artist_name:
-                return f"🎵 Found and auto-playing '{song_name}' by {artist_name} on YouTube in your browser!"
+                return f"🎵 Found and auto-playing '{song_name}' by {artist_name} on YouTube in your logged-in browser!"
             else:
-                return f"🎵 Found and auto-playing '{song_name}' on YouTube in your browser!"
+                return f"🎵 Found and auto-playing '{song_name}' on YouTube in your logged-in browser!"
         else:
             # Fallback to regular search if no video found
             youtube_url = f"https://www.youtube.com/results?search_query={encoded_query}"
@@ -462,6 +472,88 @@ def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
             return f"🎵 Opened YouTube search for your song. Click on the first result to play it! (Auto-detection failed: {e})"
         except:
             return f"Error opening YouTube: {e}"
+
+
+@tool
+def auto_play_youtube_music_song(song_name: str, artist_name: str = None) -> str:
+    """
+    Plays a song on YOUTUBE MUSIC in your logged-in browser with AUTO-PLAY.
+    Opens YouTube Music in your existing browser where you're already signed in.
+    This is the RECOMMENDED tool for YouTube Music - uses your existing logged-in browser!
+
+    Args:
+        song_name: The name of the song to search for
+        artist_name: Optional artist name to improve search accuracy
+    """
+    try:
+        # Construct search query
+        if artist_name:
+            search_query = f"{song_name} {artist_name}"
+        else:
+            search_query = song_name
+
+        # Strategy: Search on regular YouTube first (better scraping), then convert to YouTube Music link
+        encoded_query = urllib.parse.quote_plus(search_query)
+        youtube_search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
+
+        # Headers to mimic a real browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+
+        try:
+            # Get video ID from YouTube search
+            response = requests.get(youtube_search_url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            # Look for video IDs in the HTML (11-character YouTube IDs)
+            video_id_pattern = r'"videoId":"([a-zA-Z0-9_-]{11})"'
+            matches = re.findall(video_id_pattern, response.text)
+
+            if matches:
+                # Get the first video ID
+                first_video_id = matches[0]
+
+                # Construct direct YouTube Music video URL (not search URL!)
+                video_url = f"https://music.youtube.com/watch?v={first_video_id}"
+
+                # Open in EXISTING default browser (where user is logged in)
+                webbrowser.open(video_url)
+
+                if artist_name:
+                    return f"🎵 Now playing '{song_name}' by {artist_name} on YouTube Music in your logged-in browser!"
+                else:
+                    return f"🎵 Now playing '{song_name}' on YouTube Music in your logged-in browser!"
+            else:
+                # If no video ID found, try alternative pattern
+                video_id_pattern_alt = r'/watch\?v=([a-zA-Z0-9_-]{11})'
+                matches_alt = re.findall(video_id_pattern_alt, response.text)
+
+                if matches_alt:
+                    first_video_id = matches_alt[0]
+                    video_url = f"https://music.youtube.com/watch?v={first_video_id}"
+                    webbrowser.open(video_url)
+
+                    if artist_name:
+                        return f"🎵 Now playing '{song_name}' by {artist_name} on YouTube Music in your logged-in browser!"
+                    else:
+                        return f"🎵 Now playing '{song_name}' on YouTube Music in your logged-in browser!"
+
+        except Exception as scrape_error:
+            print(f"Scraping failed: {scrape_error}")
+
+        # Fallback: If scraping fails, try YouTube Music direct search
+        # This will open the search page, but at least it's on YouTube Music
+        yt_music_search = f"https://music.youtube.com/search?q={encoded_query}"
+        webbrowser.open(yt_music_search)
+
+        if artist_name:
+            return f"🎵 Opened YouTube Music search for '{song_name}' by {artist_name} in your logged-in browser. Click the first result to play!"
+        else:
+            return f"🎵 Opened YouTube Music search for '{song_name}' in your logged-in browser. Click the first result to play!"
+
+    except Exception as e:
+        return f"Error opening YouTube Music: {e}"
 
 
 @tool
@@ -721,6 +813,7 @@ def play_genre_playlist(genre: str, platform: str = "youtube_music") -> str:
         platform: Platform to use ("youtube_music", "youtube", or "spotify")
     """
     try:
+        sp, _ = _get_spotify_client()
         if platform == "spotify" and sp:
             # Search for genre playlist on Spotify
             results = sp.search(q=f"{genre}", type='playlist', limit=1)
@@ -793,6 +886,7 @@ def play_mood_music(mood: str) -> str:
         search_query = mood_queries.get(mood.lower(), f"{mood} music")
 
         # Try Spotify first if available
+        sp, _ = _get_spotify_client()
         if sp:
             try:
                 results = sp.search(q=search_query, type='playlist', limit=1)
@@ -837,6 +931,7 @@ def discover_new_music(based_on: str = None) -> str:
         based_on: Optional artist or genre to base recommendations on
     """
     try:
+        sp, _ = _get_spotify_client()
         if sp:
             try:
                 if based_on:
@@ -891,9 +986,10 @@ music_tools = [
     set_volume,
     get_current_song,
 
-    # Enhanced YouTube tools with auto-play
+    # Enhanced YouTube tools with auto-play (uses existing logged-in browser)
+    auto_play_youtube_music_song,  # BEST for YouTube Music - uses logged-in browser
+    auto_play_youtube_song,         # BEST for YouTube - uses logged-in browser
     play_music_smart,  # Primary smart tool that tries multiple platforms
-    auto_play_youtube_song,  # Direct auto-play YouTube
     play_youtube_music_direct,  # Auto-play with YouTube Music backup
     play_on_youtube_music,
     play_on_youtube,

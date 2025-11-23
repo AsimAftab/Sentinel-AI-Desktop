@@ -45,9 +45,11 @@ def _close_browser():
 @tool
 def playwright_play_youtube_music(song_name: str, artist_name: str = None, auto_play: bool = True) -> str:
     """
-    [RECOMMENDED] Automatically plays a song on YouTube Music with TRUE AUTO-PLAY.
-    Uses browser automation to search and click play - NO manual clicking needed!
-    The song will start playing automatically in the browser.
+    [RECOMMENDED for YOUTUBE MUSIC] Plays songs on YOUTUBE MUSIC with TRUE AUTO-PLAY.
+    Uses browser automation - song starts playing automatically, NO manual clicking!
+
+    IMPORTANT: This is specifically for YouTube Music (music.youtube.com), NOT regular YouTube!
+    For regular YouTube videos, use playwright_play_youtube instead.
 
     Args:
         song_name: The name of the song to search for
@@ -116,9 +118,11 @@ def playwright_play_youtube_music(song_name: str, artist_name: str = None, auto_
 @tool
 def playwright_play_youtube(song_name: str, artist_name: str = None, auto_play: bool = True) -> str:
     """
-    [RECOMMENDED] Automatically plays a song on YouTube with TRUE AUTO-PLAY.
-    Uses browser automation to search and click the video - NO manual clicking needed!
-    The video will start playing automatically in the browser.
+    [RECOMMENDED for REGULAR YOUTUBE] Plays songs on REGULAR YOUTUBE with TRUE AUTO-PLAY.
+    Uses browser automation - video starts playing automatically, NO manual clicking!
+
+    IMPORTANT: This is specifically for regular YouTube (youtube.com), NOT YouTube Music!
+    For YouTube Music, use playwright_play_youtube_music instead.
 
     Args:
         song_name: The name of the song to search for

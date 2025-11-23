@@ -252,7 +252,7 @@ class DashboardPage(QWidget):
         sidebar_layout.addWidget(app_title)
 
         # Greeting
-        greeting = QLabel(f"Hey, {self.username}! 👋")
+        greeting = QLabel(f"Hey, {self.fullname}! 👋")
         greeting.setObjectName("greeting")
         sidebar_layout.addWidget(greeting)
 
@@ -599,13 +599,19 @@ class DashboardPage(QWidget):
 
         try:
             # Call ServiceManager to connect (runs in background thread)
-            # But we need to pass user_id to MeetService
+            # But we need to pass user_id to service
             # So we need to re-register the service with user_id
             if internal_name == "GMeet":
                 from services.meet_service import MeetService
                 self.service_manager.register_service(
                     "GMeet",
                     MeetService(user_id=self.user_id)
+                )
+            elif internal_name == "Spotify":
+                from services.spotify_service import SpotifyService
+                self.service_manager.register_service(
+                    "Spotify",
+                    SpotifyService(user_id=self.user_id)
                 )
 
             future = self.service_manager.connect(internal_name)
