@@ -98,9 +98,9 @@ class DashboardPage(QWidget):
         # Backend status tracking
         self.backend_status = "Backend Not Connected"
         self.backend_color = "#6b7280"  # Gray for not connected
-        self.comm_bus = None  # Initialize to None
+        self.event_bus = None  # Initialize to None
 
-        # Try to get backend status from communication bus (optional)
+        # Try to get backend status from event bus (optional)
         try:
             import sys
             # Calculate integration path relative to project root
@@ -113,15 +113,25 @@ class DashboardPage(QWidget):
             project_root = os.path.dirname(frontend_dir)  # .../Sentinel-AI-Desktop
             integration_path = os.path.join(project_root, "integration")
 
-            print(f"🔍 Looking for communication.py at: {integration_path}")
+            print(f"🔍 Looking for event_bus.py at: {integration_path}")
 
             if os.path.exists(integration_path):
                 if integration_path not in sys.path:
                     sys.path.insert(0, integration_path)
                     print(f"✅ Added to sys.path: {integration_path}")
 
-                from communication import CommunicationBus, BackendStatus
-                self.comm_bus = CommunicationBus()
+                # Add project root to path for integration package import
+                if str(project_root) not in sys.path:
+                    sys.path.insert(0, str(project_root))
+
+                # Import from integration package
+                try:
+                    from integration.event_bus import EventBus, BackendStatus, EventType
+                except ImportError:
+                    # Fallback: direct import if integration is in sys.path
+                    from event_bus import EventBus, BackendStatus, EventType  # type: ignore
+
+                self.event_bus = EventBus()
 
                 # DON'T assume status - wait for backend to report it
                 self.backend_status = "Connecting to backend..."
@@ -262,6 +272,22 @@ class DashboardPage(QWidget):
         # Push everything down
         sidebar_layout.addStretch()
 
+        # Logout button (above profile card)
+        logout_btn = QPushButton("  Logout")
+        logout_btn.setObjectName("logoutBtn")
+        logout_btn.setCursor(Qt.PointingHandCursor)
+        logout_btn.setFixedHeight(40)
+        try:
+            logout_icon = qta.icon('fa5s.sign-out-alt', color='#ef4444', scale_factor=0.9)
+            logout_btn.setIcon(logout_icon)
+            logout_btn.setIconSize(QSize(16, 16))
+        except:
+            pass
+        logout_btn.clicked.connect(self.logout_user)
+        sidebar_layout.addWidget(logout_btn)
+
+        sidebar_layout.addSpacing(12)
+
         # User profile card at bottom
         profile_card = self.create_profile_card()
         sidebar_layout.addWidget(profile_card)
@@ -328,10 +354,6 @@ class DashboardPage(QWidget):
         info_layout.addWidget(email_label)
 
         profile_layout.addLayout(info_layout)
-
-        # Add logout button (clickable)
-        profile_card.mousePressEvent = lambda event: self.logout_user()
-        profile_card.setCursor(Qt.PointingHandCursor)
 
         return profile_card
 
@@ -710,31 +732,37 @@ class DashboardPage(QWidget):
             )
 
     def update_backend_status(self):
-        """Update backend status from communication bus"""
-        if not self.comm_bus:
+        """Update backend status from event bus"""
+        if not self.event_bus:
             return
 
         try:
-            from communication import MessageType, BackendStatus
+            # Import event types (already imported during init, but needed for type checking)
+            try:
+                from integration.event_bus import EventType, BackendStatus
+            except ImportError:
+                from event_bus import EventType, BackendStatus  # type: ignore
 
-            # Check for messages from backend
-            message = self.comm_bus.get_frontend_message()
-            if not message:
+            # Check for events from backend
+            event = self.event_bus.get_event()
+            if not event:
                 return
 
-            if message.type == MessageType.STATUS_UPDATE:
-                # Update status based on backend status
+            # Update status based on event and backend status
+            if event.status:
                 status_map = {
                     BackendStatus.STARTING: ("Starting...", "#f59e0b"),  # Orange
                     BackendStatus.READY: ("Ready", "#10b981"),  # Green
                     BackendStatus.LISTENING: ("Listening for 'Sentinel'", "#10b981"),  # Green
+                    BackendStatus.WAKE_WORD_DETECTED: ("Wake word detected!", "#8b5cf6"),  # Purple
                     BackendStatus.PROCESSING: ("Processing...", "#3b82f6"),  # Blue
+                    BackendStatus.SPEAKING: ("Speaking...", "#06b6d4"),  # Cyan
                     BackendStatus.ERROR: ("Error", "#ef4444"),  # Red
                     BackendStatus.STOPPED: ("Stopped", "#6b7280"),  # Gray
                 }
 
-                if message.status in status_map:
-                    self.backend_status, self.backend_color = status_map[message.status]
+                if event.status in status_map:
+                    self.backend_status, self.backend_color = status_map[event.status]
                     self.status_badge.setText(f"● {self.backend_status}")
                     self.status_badge.setStyleSheet(f"""
                         background-color: {self.backend_color}20;
@@ -745,9 +773,10 @@ class DashboardPage(QWidget):
                         font-weight: 500;
                     """)
 
-            elif message.type == MessageType.WAKE_WORD_DETECTED:
-                self.backend_status = "Wake word detected!"
-                self.backend_color = "#8b5cf6"  # Purple
+            # Handle specific event types for additional context
+            elif event.type == EventType.COMMAND_RECEIVED:
+                self.backend_status = f"Command: {event.data or 'processing'}"
+                self.backend_color = "#3b82f6"  # Blue
                 self.status_badge.setText(f"● {self.backend_status}")
                 self.status_badge.setStyleSheet(f"""
                     background-color: {self.backend_color}20;
@@ -757,11 +786,6 @@ class DashboardPage(QWidget):
                     font-size: 12px;
                     font-weight: 500;
                 """)
-
-            elif message.type == MessageType.COMMAND_RECEIVED:
-                self.backend_status = f"Command: {message.data or 'processing'}"
-                self.backend_color = "#3b82f6"  # Blue
-                self.status_badge.setText(f"● {self.backend_status}")
 
         except Exception as e:
             print(f"⚠️ Error updating backend status: {e}")

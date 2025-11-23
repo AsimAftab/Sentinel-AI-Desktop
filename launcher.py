@@ -11,8 +11,9 @@ Usage:
 The launcher will:
 - Run the PyQt5 frontend on the main thread (Qt requirement)
 - Run the backend voice assistant on a child thread
+- Use event-based communication (NO monkey patching!)
 - Monitor both components and handle graceful shutdown
-- Display backend status in the frontend dashboard
+- Display backend status in the frontend dashboard via EventBus
 """
 
 import sys
@@ -24,9 +25,8 @@ from pathlib import Path
 # Add integration module to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from integration.backend_runner import BackendRunner
-from integration.frontend_enhancer import FrontendEnhancer
-from integration.communication import CommunicationBus, Message, MessageType
+from integration.backend_runner_v2 import BackendRunner
+from integration.event_bus import EventBus
 
 
 class SentinelLauncher:
@@ -34,8 +34,7 @@ class SentinelLauncher:
 
     def __init__(self):
         self.backend_runner = None
-        self.frontend_enhancer = None
-        self.comm_bus = CommunicationBus()
+        self.event_bus = EventBus()
         self.app = None
         self.shutting_down = False
 
@@ -64,9 +63,8 @@ class SentinelLauncher:
         frontend_path = Path(__file__).parent / "Sentinel-AI-Frontend"
         sys.path.insert(0, str(frontend_path))
 
-        # Enhance frontend with backend status widget
-        self.frontend_enhancer = FrontendEnhancer(self.backend_runner)
-        self.frontend_enhancer.enhance_frontend()
+        # No need for frontend enhancement - event system works directly!
+        print("✅ Event-based communication active (no monkey patching)")
 
         # Import PyQt5 and frontend main
         from PyQt5.QtWidgets import QApplication
@@ -164,8 +162,8 @@ class SentinelLauncher:
             if self.backend_runner.is_alive():
                 print("Warning: Backend did not stop gracefully")
 
-        # Clear communication bus
-        self.comm_bus.clear()
+        # Clear event bus
+        self.event_bus.clear()
 
         print("Shutdown complete")
 
