@@ -41,6 +41,10 @@ The application requires environment variables in two `.env` files:
 - `ELEVENLABS_VOICE_ID` - Optional voice ID (defaults to Sarah)
 - `TTS_ENABLED` - Enable/disable text-to-speech (true/false)
 - `GENIUS_API_TOKEN` - Optional Genius API for full lyrics text
+- `LANGCHAIN_TRACING_V2` - Enable LangSmith tracing (true/false) for debugging
+- `LANGCHAIN_API_KEY` - LangSmith API key from https://smith.langchain.com/settings
+- `LANGCHAIN_PROJECT` - LangSmith project name (e.g., "sentinel-ai-desktop-backend")
+- `LANGCHAIN_ENDPOINT` - LangSmith API endpoint (https://api.smith.langchain.com)
 
 **Sentinel-AI-Frontend/.env** (Database):
 - `MONGODB_CONNECTION_STRING` - MongoDB Atlas connection string
@@ -214,11 +218,12 @@ The launcher ensures graceful shutdown:
 
 ## Dependencies
 
-**Backend** (294 packages):
-- Core: `langgraph`, `langchain`, `langchain-openai`
+**Backend** (295 packages):
+- Core: `langgraph`, `langchain`, `langchain-openai`, `langsmith`
 - Voice: `PyAudio`, `SpeechRecognition`, `pvporcupine` (wake word)
 - Tools: `spotipy` (Spotify), `tavily-python` (search), `selenium` (browser)
 - ML: `transformers`, `torch`, `sentence-transformers`
+- Debugging: `langsmith` (tracing and observability)
 
 **Frontend** (11 packages):
 - UI: `PyQt5`
@@ -255,6 +260,44 @@ result = graph.invoke({
 })
 print(result["messages"][-1])
 ```
+
+## Debugging with LangSmith
+
+LangSmith provides powerful observability and debugging for the LangGraph multi-agent system.
+
+### Setup LangSmith
+
+1. **Get API Key**: Sign up at https://smith.langchain.com and get your API key from Settings
+2. **Configure Environment**: Add to `Sentinel-AI-Backend/.env`:
+   ```bash
+   LANGCHAIN_TRACING_V2=true
+   LANGCHAIN_API_KEY=your_api_key_here
+   LANGCHAIN_PROJECT=sentinel-ai-desktop-backend
+   LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+   ```
+3. **Run Application**: Tracing is automatic when enabled - just run the backend
+4. **View Traces**: Visit https://smith.langchain.com to see detailed execution traces
+
+### What LangSmith Shows
+
+- **Agent Routing**: See how the Supervisor routes tasks to Browser/Music/Meeting agents
+- **Tool Calls**: Track which tools are called with what parameters
+- **LLM Interactions**: View all prompts sent to Azure OpenAI and responses received
+- **Execution Time**: Identify performance bottlenecks in the agent pipeline
+- **Error Tracking**: Debug failures with full stack traces and context
+- **Multi-Turn Conversations**: Trace follow-up questions through the conversation loop
+
+### Debugging Tips
+
+- Each voice command creates a new trace in LangSmith
+- Filter traces by agent (Browser, Music, Meeting) to debug specific tools
+- Use "Playground" to replay and modify prompts without voice input
+- Check token usage to optimize costs
+- Export traces to share with team or for documentation
+
+### Disabling Tracing
+
+Set `LANGCHAIN_TRACING_V2=false` in `.env` or comment out the variable to disable tracing.
 
 ## Common Issues
 

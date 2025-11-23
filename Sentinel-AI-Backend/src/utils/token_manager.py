@@ -64,23 +64,19 @@ class TokenManager:
         Get current user_id from user context file.
         This file is written by the frontend when a user logs in.
         """
-        context_paths = [
-            self.backend_dir / "user_context.json",
-            self.frontend_dir / "user_context.json",
-            self.backend_dir.parent / "user_context.json",
-        ]
+        # Single canonical location at project root
+        context_path = self.backend_dir.parent / "user_context.json"
 
-        for path in context_paths:
-            if path.exists():
-                try:
-                    with open(path, 'r') as f:
-                        context = json.load(f)
-                        user_id = context.get("current_user_id") or context.get("user_id")
-                        if user_id:
-                            log.info("✅ Found user_id from context: %s", user_id)
-                            return str(user_id)
-                except Exception as e:
-                    log.warning("Failed to read user context from %s: %s", path, e)
+        if context_path.exists():
+            try:
+                with open(context_path, 'r') as f:
+                    context = json.load(f)
+                    user_id = context.get("current_user_id") or context.get("user_id")
+                    if user_id:
+                        log.info("✅ Found user_id from context: %s", user_id)
+                        return str(user_id)
+            except Exception as e:
+                log.warning("Failed to read user context from %s: %s", context_path, e)
 
         log.warning("⚠️ No user context found. Tokens will not be user-specific.")
         return None
