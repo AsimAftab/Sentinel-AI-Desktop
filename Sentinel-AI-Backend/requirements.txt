@@ -24,6 +24,10 @@ google-auth==2.40.2
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.154.0
 
+# Database (for token storage)
+pymongo==4.10.1
+dnspython==2.7.0
+
 # Web Tools
 requests==2.32.3
 beautifulsoup4==4.13.4

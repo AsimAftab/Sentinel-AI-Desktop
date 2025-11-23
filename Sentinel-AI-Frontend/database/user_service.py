@@ -37,9 +37,29 @@ class UserService:
             result = users_collection.insert_one(user_doc)
             
             return True, f"User saved successfully with ID: {result.inserted_id}"
-            
+
         except Exception as e:
             return False, f"Database error: {str(e)}"
+        finally:
+            if client:
+                client.close()
+
+    def get_user_by_username(self, username):
+        """Get user document from MongoDB by username (includes _id)"""
+        client = None
+        try:
+            connection_params = self.config.get_connection_params()
+            client = MongoClient(**connection_params)
+
+            db = client[self.config.MONGODB_DATABASE]
+            users_collection = db[self.config.MONGODB_COLLECTION_USERS]
+
+            user = users_collection.find_one({"username": username})
+            return user  # Returns None if not found, or full user document with _id
+
+        except Exception as e:
+            print(f"Error fetching user: {e}")
+            return None
         finally:
             if client:
                 client.close()

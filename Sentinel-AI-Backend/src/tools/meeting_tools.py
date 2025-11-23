@@ -3,6 +3,8 @@
 import os
 import json
 import webbrowser
+import logging
+import traceback
 from datetime import datetime, timedelta
 from typing import Optional
 from langchain_core.tools import tool
@@ -13,118 +15,105 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from src.utils.token_manager import get_token_manager
+
+# Setup detailed logging
+logging.basicConfig(level=logging.DEBUG)
+log = logging.getLogger(__name__)
+
 # Google Calendar and Meet API scopes
 SCOPES = [
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/calendar.events'
 ]
 
-# Paths for credentials and token
-# Look in both Backend and Frontend directories
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FRONTEND_DIR = os.path.join(os.path.dirname(BACKEND_DIR), 'Sentinel-AI-Frontend')
 
-CREDENTIALS_PATH = None
-TOKEN_PATH = None
-
-# Check for credentials.json in multiple locations
-for path in [
-    os.path.join(BACKEND_DIR, 'credentials.json'),
-    os.path.join(FRONTEND_DIR, 'credentials.json'),
-]:
-    if os.path.exists(path):
-        CREDENTIALS_PATH = path
-        break
-
-# Check for token.json in multiple locations
-for path in [
-    os.path.join(BACKEND_DIR, 'token.json'),
-    os.path.join(FRONTEND_DIR, 'token.json'),
-]:
-    if os.path.exists(path):
-        TOKEN_PATH = path
-        break
-
-# Default paths if not found
-if not CREDENTIALS_PATH:
-    CREDENTIALS_PATH = os.path.join(BACKEND_DIR, 'credentials.json')
-if not TOKEN_PATH:
-    TOKEN_PATH = os.path.join(BACKEND_DIR, 'token.json')
-
-
-def get_calendar_service():
+def get_calendar_service(user_id: Optional[str] = None):
     """
     Authenticate and return Google Calendar API service.
-    Handles OAuth flow if needed.
+    Uses TokenManager to retrieve credentials from database or file.
+
+    Args:
+        user_id: Optional user ID. If not provided, will try to auto-detect from user context.
     """
-    creds = None
+    log.info(f"🔧 [CALENDAR_SERVICE] Starting get_calendar_service with user_id={user_id}")
 
-    # Load token if it exists
-    if os.path.exists(TOKEN_PATH):
-        try:
-            creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"⚠️ Corrupted token file, will re-authenticate. Error: {e}")
-            creds = None
+    try:
+        log.info("🔧 [CALENDAR_SERVICE] Getting TokenManager instance...")
+        token_manager = get_token_manager()
+        log.info(f"✅ [CALENDAR_SERVICE] TokenManager obtained. MongoDB available: {token_manager.mongodb_available}")
 
-    # Refresh or run OAuth flow
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                # Save refreshed token
-                with open(TOKEN_PATH, 'w') as token:
-                    token.write(creds.to_json())
-            except Exception as e:
-                print(f"⚠️ Token refresh failed: {e}. Running OAuth flow...")
-                creds = None
+        # Get credentials using TokenManager
+        log.info(f"🔧 [CALENDAR_SERVICE] Fetching calendar credentials for user_id={user_id}...")
+        creds = token_manager.get_calendar_credentials(user_id=user_id, scopes=SCOPES)
 
         if not creds:
-            # Run full OAuth flow
-            if not os.path.exists(CREDENTIALS_PATH):
-                raise FileNotFoundError(
-                    f"❌ Google OAuth credentials not found!\n\n"
-                    f"Expected: {CREDENTIALS_PATH}\n\n"
-                    f"Please:\n"
-                    f"1. Go to https://console.cloud.google.com/\n"
-                    f"2. Create OAuth 2.0 credentials\n"
-                    f"3. Download credentials.json\n"
-                    f"4. Place in: Sentinel-AI-Backend/credentials.json"
-                )
+            error_msg = (
+                "❌ No valid Google Calendar credentials found!\n\n"
+                "Please authenticate using the frontend:\n"
+                "1. Login to Sentinel AI Frontend\n"
+                "2. Click 'Connect' button for Google Meet\n"
+                "3. Complete OAuth flow\n\n"
+                "Or if using backend standalone:\n"
+                "1. Run frontend and authenticate\n"
+                "2. Token will be saved to database\n"
+                "3. Backend will automatically use it"
+            )
+            log.error(f"❌ [CALENDAR_SERVICE] {error_msg}")
+            raise ValueError(error_msg)
 
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0, open_browser=True)
+        log.info("✅ [CALENDAR_SERVICE] Credentials obtained successfully")
+        log.info(f"🔧 [CALENDAR_SERVICE] Credentials valid: {creds.valid}")
+        log.info(f"🔧 [CALENDAR_SERVICE] Credentials expired: {creds.expired}")
+        log.info(f"🔧 [CALENDAR_SERVICE] Has refresh token: {bool(creds.refresh_token)}")
 
-            # Save token
-            with open(TOKEN_PATH, 'w') as token:
-                token.write(creds.to_json())
+        # Build and return service
+        log.info("🔧 [CALENDAR_SERVICE] Building Google Calendar API service...")
+        service = build('calendar', 'v3', credentials=creds)
+        log.info("✅ [CALENDAR_SERVICE] Calendar service built successfully")
+        return service
 
-    # Build and return service
-    service = build('calendar', 'v3', credentials=creds)
-    return service
+    except Exception as e:
+        log.error(f"❌ [CALENDAR_SERVICE] Error in get_calendar_service: {type(e).__name__}: {e}")
+        log.error(f"📍 [CALENDAR_SERVICE] Traceback:\n{traceback.format_exc()}")
+        raise
 
 
 @tool
-def create_instant_meeting(title: str = "Quick Meeting", duration_minutes: int = 60) -> str:
+def create_instant_meeting(
+    title: str = "Quick Meeting",
+    duration_minutes: int = 60,
+    attendees: Optional[str] = None,
+    description: Optional[str] = None,
+    auto_open: bool = True
+) -> str:
     """
-    Creates an instant Google Meet meeting starting now.
+    Creates an instant Google Meet meeting starting now with enhanced controls.
     Returns the meeting link that can be joined immediately.
 
     Args:
-        title: Meeting title/subject
-        duration_minutes: Meeting duration in minutes (default 60)
+        title: Meeting title/subject (default: "Quick Meeting")
+        duration_minutes: Meeting duration in minutes (default: 60)
+        attendees: Comma-separated email addresses to invite (optional)
+        description: Meeting description/agenda (optional)
+        auto_open: Auto-open meeting in browser (default: True)
     """
     try:
+        log.info(f"🔧 [MEETING] Starting create_instant_meeting: title='{title}', duration={duration_minutes}min")
+
+        log.info("🔧 [MEETING] Step 1: Getting Calendar service...")
         service = get_calendar_service()
+        log.info("✅ [MEETING] Calendar service obtained successfully")
 
         # Calculate start and end times
         start_time = datetime.utcnow()
         end_time = start_time + timedelta(minutes=duration_minutes)
+        log.info(f"🔧 [MEETING] Step 2: Times calculated - Start: {start_time}, End: {end_time}")
 
         # Create event with Google Meet
         event = {
             'summary': title,
-            'description': f'Instant meeting created by Sentinel AI',
+            'description': description or 'Instant meeting created by Sentinel AI',
             'start': {
                 'dateTime': start_time.isoformat() + 'Z',
                 'timeZone': 'UTC',
@@ -141,30 +130,67 @@ def create_instant_meeting(title: str = "Quick Meeting", duration_minutes: int =
             },
         }
 
+        # Add attendees if provided
+        if attendees:
+            attendee_list = [{'email': email.strip()} for email in attendees.split(',')]
+            event['attendees'] = attendee_list
+            log.info(f"🔧 [MEETING] Added {len(attendee_list)} attendee(s): {[a['email'] for a in attendee_list]}")
+
+        log.info(f"🔧 [MEETING] Step 3: Event object created")
+
         # Insert event with conference data
+        log.info("🔧 [MEETING] Step 4: Inserting event into Google Calendar...")
         event = service.events().insert(
             calendarId='primary',
             body=event,
-            conferenceDataVersion=1
+            conferenceDataVersion=1,
+            sendUpdates='all' if attendees else 'none'  # Send invites if attendees
         ).execute()
+        log.info(f"✅ [MEETING] Event created successfully! Event ID: {event.get('id')}")
+        log.info(f"🔧 [MEETING] Full event response: {json.dumps(event, indent=2)}")
 
         # Extract meeting link
         meet_link = event.get('hangoutLink')
+        log.info(f"🔧 [MEETING] Step 5: Extracted meeting link: {meet_link}")
 
         if meet_link:
-            # Open meeting in browser
-            webbrowser.open(meet_link)
+            # Build response message
+            result = f"✅ Created instant meeting: '{title}'\n"
+            result += f"📅 Duration: {duration_minutes} minutes\n"
+            result += f"🔗 Meeting link: {meet_link}\n"
 
-            return f"✅ Created instant meeting: '{title}'\n📅 Duration: {duration_minutes} minutes\n🔗 Meeting link: {meet_link}\n\n✨ Opening meeting in browser..."
+            if attendees:
+                attendee_count = len(attendees.split(','))
+                result += f"👥 Invited: {attendee_count} attendee(s)\n"
+                result += f"✉️ Calendar invites sent!\n"
+
+            if description:
+                result += f"📝 Agenda: {description[:50]}{'...' if len(description) > 50 else ''}\n"
+
+            # Open meeting in browser if requested
+            if auto_open:
+                log.info("🔧 [MEETING] Step 6: Opening meeting in browser...")
+                webbrowser.open(meet_link)
+                result += "\n✨ Opening meeting in browser..."
+
+            return result
         else:
+            log.warning("⚠️ [MEETING] No hangoutLink in event response!")
             return f"✅ Created calendar event but Google Meet link generation failed. Please check your Google Calendar."
 
     except FileNotFoundError as e:
-        return str(e)
+        log.error(f"❌ [MEETING] FileNotFoundError: {e}")
+        log.error(f"📍 [MEETING] Traceback:\n{traceback.format_exc()}")
+        return f"❌ File not found: {e}\n\nTraceback:\n{traceback.format_exc()}"
     except HttpError as e:
-        return f"❌ Google Calendar API error: {e}"
+        log.error(f"❌ [MEETING] Google API HttpError: {e}")
+        log.error(f"📍 [MEETING] Error details: {e.error_details if hasattr(e, 'error_details') else 'No details'}")
+        log.error(f"📍 [MEETING] Traceback:\n{traceback.format_exc()}")
+        return f"❌ Google Calendar API error: {e}\n\nDetails: {e.error_details if hasattr(e, 'error_details') else 'No details'}\n\nTraceback:\n{traceback.format_exc()}"
     except Exception as e:
-        return f"❌ Error creating meeting: {e}"
+        log.error(f"❌ [MEETING] Unexpected error: {type(e).__name__}: {e}")
+        log.error(f"📍 [MEETING] Full traceback:\n{traceback.format_exc()}")
+        return f"❌ Error creating meeting: {type(e).__name__}: {e}\n\n📍 FULL TRACEBACK:\n{traceback.format_exc()}"
 
 
 @tool
@@ -478,12 +504,237 @@ def cancel_next_meeting() -> str:
         return f"❌ Error cancelling meeting: {e}"
 
 
-# Meeting tools list
+@tool
+def create_quick_meeting_template(template_type: str, title: Optional[str] = None) -> str:
+    """
+    Create a meeting using a predefined template for common meeting types.
+
+    Args:
+        template_type: Type of meeting - options: "standup", "1on1", "brainstorm", "review", "demo"
+        title: Optional custom title (will use template default if not provided)
+    """
+    templates = {
+        "standup": {
+            "title": "Daily Standup",
+            "duration": 15,
+            "description": "Quick team sync:\n- What did you do yesterday?\n- What are you doing today?\n- Any blockers?"
+        },
+        "1on1": {
+            "title": "1-on-1 Meeting",
+            "duration": 30,
+            "description": "One-on-one discussion:\n- Updates and progress\n- Concerns and feedback\n- Career development"
+        },
+        "brainstorm": {
+            "title": "Brainstorming Session",
+            "duration": 45,
+            "description": "Creative brainstorming:\n- Problem statement\n- Idea generation\n- Action items"
+        },
+        "review": {
+            "title": "Code/Design Review",
+            "duration": 30,
+            "description": "Review session:\n- Overview of changes\n- Discussion and feedback\n- Approval and next steps"
+        },
+        "demo": {
+            "title": "Product Demo",
+            "duration": 30,
+            "description": "Product demonstration:\n- Feature overview\n- Live demo\n- Q&A session"
+        }
+    }
+
+    template_type = template_type.lower()
+    if template_type not in templates:
+        return f"❌ Unknown template type. Available templates: {', '.join(templates.keys())}"
+
+    template = templates[template_type]
+    meeting_title = title or template["title"]
+
+    # Create instant meeting with template settings
+    return create_instant_meeting(
+        title=meeting_title,
+        duration_minutes=template["duration"],
+        description=template["description"]
+    )
+
+
+@tool
+def update_meeting_details(
+    meeting_id: str,
+    new_title: Optional[str] = None,
+    new_description: Optional[str] = None,
+    add_attendees: Optional[str] = None
+) -> str:
+    """
+    Update an existing meeting's details.
+
+    Args:
+        meeting_id: The meeting/event ID to update
+        new_title: New meeting title (optional)
+        new_description: New description (optional)
+        add_attendees: Comma-separated emails to add as attendees (optional)
+    """
+    try:
+        service = get_calendar_service()
+
+        # Get current event
+        event = service.events().get(calendarId='primary', eventId=meeting_id).execute()
+
+        # Update fields
+        if new_title:
+            event['summary'] = new_title
+
+        if new_description:
+            event['description'] = new_description
+
+        if add_attendees:
+            current_attendees = event.get('attendees', [])
+            new_attendee_list = [{'email': email.strip()} for email in add_attendees.split(',')]
+            event['attendees'] = current_attendees + new_attendee_list
+
+        # Update the event
+        updated_event = service.events().update(
+            calendarId='primary',
+            eventId=meeting_id,
+            body=event,
+            sendUpdates='all'
+        ).execute()
+
+        result = f"✅ Meeting updated!\n"
+        result += f"📅 {updated_event.get('summary')}\n"
+
+        if add_attendees:
+            result += f"👥 Added {len(new_attendee_list)} new attendee(s)\n"
+
+        meet_link = updated_event.get('hangoutLink')
+        if meet_link:
+            result += f"🔗 {meet_link}\n"
+
+        return result
+
+    except HttpError as e:
+        return f"❌ Google Calendar API error: {e}"
+    except Exception as e:
+        return f"❌ Error updating meeting: {e}\n{traceback.format_exc()}"
+
+
+@tool
+def set_meeting_reminder(minutes_before: int = 10) -> str:
+    """
+    Set a default reminder for the next upcoming meeting.
+
+    Args:
+        minutes_before: Minutes before meeting to send reminder (default: 10)
+    """
+    try:
+        service = get_calendar_service()
+
+        # Get next meeting
+        now = datetime.utcnow().isoformat() + 'Z'
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=now,
+            maxResults=1,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+
+        events = events_result.get('items', [])
+        if not events:
+            return "📅 No upcoming meetings to set reminder for."
+
+        event = events[0]
+        event_id = event['id']
+        title = event.get('summary', 'Untitled')
+
+        # Add reminder
+        event['reminders'] = {
+            'useDefault': False,
+            'overrides': [
+                {'method': 'popup', 'minutes': minutes_before},
+                {'method': 'email', 'minutes': minutes_before}
+            ]
+        }
+
+        # Update event
+        service.events().update(
+            calendarId='primary',
+            eventId=event_id,
+            body=event
+        ).execute()
+
+        return f"✅ Reminder set for '{title}'\n⏰ {minutes_before} minutes before meeting\n📧 Email + popup notification"
+
+    except HttpError as e:
+        return f"❌ Google Calendar API error: {e}"
+    except Exception as e:
+        return f"❌ Error setting reminder: {e}"
+
+
+@tool
+def get_meeting_details(meeting_id: str) -> str:
+    """
+    Get detailed information about a specific meeting.
+
+    Args:
+        meeting_id: The meeting/event ID
+    """
+    try:
+        service = get_calendar_service()
+
+        event = service.events().get(calendarId='primary', eventId=meeting_id).execute()
+
+        result = f"📅 **Meeting Details:**\n\n"
+        result += f"📌 Title: {event.get('summary', 'Untitled')}\n"
+
+        # Times
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        end = event['end'].get('dateTime', event['end'].get('date'))
+        result += f"🕐 Start: {start}\n"
+        result += f"🕐 End: {end}\n"
+
+        # Description
+        if event.get('description'):
+            result += f"\n📝 Description:\n{event['description']}\n"
+
+        # Attendees
+        attendees = event.get('attendees', [])
+        if attendees:
+            result += f"\n👥 Attendees ({len(attendees)}):\n"
+            for attendee in attendees[:5]:  # Show first 5
+                status = attendee.get('responseStatus', 'unknown')
+                result += f"  - {attendee['email']} ({status})\n"
+            if len(attendees) > 5:
+                result += f"  ... and {len(attendees) - 5} more\n"
+
+        # Meeting link
+        meet_link = event.get('hangoutLink')
+        if meet_link:
+            result += f"\n🔗 Meeting Link: {meet_link}\n"
+
+        # Reminders
+        reminders = event.get('reminders', {})
+        if not reminders.get('useDefault') and reminders.get('overrides'):
+            result += f"\n⏰ Reminders:\n"
+            for reminder in reminders['overrides']:
+                result += f"  - {reminder['method']}: {reminder['minutes']} min before\n"
+
+        return result
+
+    except HttpError as e:
+        return f"❌ Google Calendar API error: {e}"
+    except Exception as e:
+        return f"❌ Error getting meeting details: {e}"
+
+
+# Meeting tools list - updated with new controls
 meeting_tools = [
     create_instant_meeting,
     schedule_meeting,
+    create_quick_meeting_template,
     list_upcoming_meetings,
     get_next_meeting,
     join_meeting_by_code,
-    cancel_next_meeting
+    cancel_next_meeting,
+    update_meeting_details,
+    set_meeting_reminder,
+    get_meeting_details
 ]
