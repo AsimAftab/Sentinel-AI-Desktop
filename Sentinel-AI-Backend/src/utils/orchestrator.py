@@ -3,6 +3,7 @@ from src.utils.speech_recognizer import SpeechRecognitionAgent
 from src.utils.wake_word_listener import WakeWordListener
 from src.utils.langgraph_router import route_to_langgraph
 from src.utils.text_to_speech import get_tts_instance
+from src.utils.agent_memory import get_agent_memory, MemoryType
 from dotenv import load_dotenv
 import os
 import sys
@@ -83,9 +84,11 @@ def run_sentinel_agent():
     wake_listener = WakeWordListener(keyword_path=keyword_path, access_key=access_key)
     recognizer = SpeechRecognitionAgent()
     tts = get_tts_instance()  # Initialize text-to-speech
+    memory = get_agent_memory()  # Initialize agent memory
 
     wake_listener.start()
     print("🟢 Waiting for wake word... (Press Ctrl+C to exit)")
+    print("📝 Agent memory initialized")
 
     # Conversation state
     conversation_history = []
@@ -113,6 +116,13 @@ def run_sentinel_agent():
 
                 # Emit: Command received
                 _emit_event(EventType.COMMAND_RECEIVED, data=command)
+
+                # Start new memory session for this conversation
+                session_id = memory.start_session()
+                print(f"📝 Memory session started: {session_id[:8]}...")
+
+                # Store the initial command in memory
+                memory.store_command(command, session_id=session_id)
 
                 # Start conversation loop
                 conversation_history = [command]
@@ -149,6 +159,7 @@ def run_sentinel_agent():
                         if not follow_up:
                             print("⏱️ No follow-up detected. Ending conversation.")
                             _emit_event(EventType.CONVERSATION_ENDED)
+                            memory.end_session()
                             break
 
                         # Check for exit phrases
@@ -157,16 +168,22 @@ def run_sentinel_agent():
                             print("🛑 Conversation cancelled by user.")
                             tts.speak("Okay, cancelled.", blocking=True)
                             _emit_event(EventType.CONVERSATION_ENDED)
+                            memory.end_session()
                             break
 
                         print(f"🧠 Follow-up: {follow_up}")
                         _emit_event(EventType.COMMAND_RECEIVED, data=follow_up)
+
+                        # Store follow-up in memory
+                        memory.store_command(follow_up, session_id=session_id)
+
                         conversation_history.append(follow_up)
                         turn_count += 1
                     else:
                         # Agent provided final answer, end conversation
                         print("✅ Conversation complete.")
                         _emit_event(EventType.CONVERSATION_ENDED)
+                        memory.end_session()
                         break
 
                 # Clear conversation history
