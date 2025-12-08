@@ -104,12 +104,15 @@ Thread-safe singleton managing bidirectional message queues:
 - `src/utils/speech_recognizer.py` - Google Speech Recognition wrapper
 - `src/utils/text_to_speech.py` - ElevenLabs TTS integration
 - `src/utils/langgraph_router.py` - Routes commands to LangGraph
-- `src/graph/graph_builder.py` - Multi-agent graph definition (3 agents)
+- `src/utils/agent_memory.py` - Short-term memory service for agent context
+- `src/graph/graph_builder.py` - Multi-agent graph definition (5 agents)
 - `src/graph/agent_state.py` - Shared state structure for agents
 - `src/tools/browser_tools.py` - Enhanced web tools (14 tools: search, weather, news, translation, etc.)
 - `src/tools/music_tools.py` - Enhanced Spotify/YouTube tools (25 tools: lyrics, genres, moods)
 - `src/tools/playwright_music_tools.py` - Playwright-based auto-play music tools (6 tools)
-- `src/tools/meeting_tools.py` - Google Meet and Calendar integration (6 tools) (NEW!)
+- `src/tools/meeting_tools.py` - Google Meet and Calendar integration (6 tools)
+- `src/tools/system_tools.py` - System control tools (15 tools: volume, brightness, apps)
+- `src/tools/productivity_tools.py` - Productivity tools (6 tools: timers, alarms)
 
 ### Frontend Architecture (Sentinel-AI-Frontend/)
 
@@ -298,6 +301,115 @@ LangSmith provides powerful observability and debugging for the LangGraph multi-
 ### Disabling Tracing
 
 Set `LANGCHAIN_TRACING_V2=false` in `.env` or comment out the variable to disable tracing.
+
+## Agent Memory System
+
+The backend includes a short-term memory system that allows agents to know what has been done in recent interactions.
+
+### How It Works
+
+**Memory Storage** (`src/utils/agent_memory.py`):
+- Uses MongoDB (same instance as frontend) for persistent storage
+- Falls back to in-memory storage if MongoDB unavailable
+- Auto-expires old memories via TTL index (default: 24 hours)
+
+**Memory Types**:
+- `command` - User voice commands
+- `agent_action` - Agent invocations with tools used
+- `tool_call` - Individual tool calls with inputs/outputs
+- `result` - Final responses
+- `error` - Errors that occurred
+
+**Session Tracking**:
+- Each wake-word conversation gets a unique `session_id`
+- Commands and actions within a session are linked
+- Sessions end when conversation completes or times out
+
+### Context Injection
+
+Before each agent executes, recent memory is injected into its prompt:
+
+```
+[Recent Activity]
+• User asked: "play some jazz"
+• Music agent used search_and_play_song: Playing jazz playlist on Spotify
+• User asked: "something more upbeat"
+
+[Current Request]
+play some funk music
+```
+
+This allows agents to understand context from previous interactions.
+
+### MongoDB Collection Schema
+
+```javascript
+// Collection: agent_memory
+{
+  "_id": ObjectId,
+  "user_id": "user_object_id",
+  "session_id": "uuid-string",
+  "timestamp": ISODate,
+  "type": "command" | "agent_action" | "tool_call" | "result" | "error",
+  "agent": "Browser" | "Music" | "Meeting" | "System" | "Productivity",
+  "content": {
+    // For commands:
+    "command": "play some jazz",
+
+    // For agent_action:
+    "input": "user request",
+    "output": "agent response",
+    "tools_used": ["tool1", "tool2"],
+    "success": true,
+    "duration_ms": 1500
+  },
+  "expires_at": ISODate  // TTL - auto-deletes after 24h
+}
+```
+
+### Configuration
+
+Add to `Sentinel-AI-Backend/.env`:
+```bash
+# Uses same MongoDB as frontend
+MONGODB_CONNECTION_STRING=mongodb+srv://...
+MONGODB_DATABASE=sentinel_ai_db
+```
+
+If not configured, memory falls back to in-memory (non-persistent, clears on restart).
+
+### Using Memory in Code
+
+```python
+from src.utils.agent_memory import get_agent_memory, MemoryType
+
+memory = get_agent_memory()
+
+# Start a session
+session_id = memory.start_session()
+
+# Store a command
+memory.store_command("play some jazz")
+
+# Store agent action
+memory.store_agent_action(
+    agent="Music",
+    input_text="play some jazz",
+    output_text="Playing jazz playlist",
+    tools_used=["search_and_play_song"],
+    success=True,
+    duration_ms=1500
+)
+
+# Get context for agent
+context = memory.get_context_for_agent(agent="Music", minutes=15)
+
+# Get recent memories
+recent = memory.get_recent_memories(minutes=30, limit=10)
+
+# End session
+memory.end_session()
+```
 
 ## Common Issues
 

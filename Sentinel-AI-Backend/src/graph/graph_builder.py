@@ -1,135 +1,15 @@
-# # src/graph/graph_builder.py
-
-# # Ensure this import is at the top
-# from langchain_core.messages import BaseMessage
-
-# from langchain_ollama import ChatOllama
-# from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-# from langgraph.graph import StateGraph, END
-# from langchain_core.output_parsers import StrOutputParser
-# from langchain.agents import AgentExecutor, create_react_agent
-# from langchain import hub
-
-# from src.graph.agent_state import AgentState
-# from src.tools.browser_tools import browser_tools
-# from src.tools.music_tools import music_tools # <--- MODIFIED: Import new music tools
-
-
-# # --- LLM and Tools setup ---
-# llm = ChatOllama(model="llama3")
-# browser_agent_tools = browser_tools
-# music_agent_tools = music_tools # <--- MODIFIED: Define music tools list
-
-
-# # --- Supervisor Chain definition ---
-# # <--- MODIFIED: Updated the supervisor prompt to include the Music agent
-# supervisor_prompt_str = """You are a supervisor in a multi-agent AI system. Your role is to oversee a team of specialized agents and route user requests.
-# Based on the last user message, you must select the next agent to act from the available list or decide if the task is complete.
-
-# Available agents:
-# - `Browser`: For tasks that require accessing the internet, searching for information, or scraping websites.
-# - `Music`: For tasks related to searching for and playing songs on Spotify.
-# - `FINISH`: If the user's question has been fully answered and the task is complete.
-
-# Analyze the conversation and output *only* the name of the next agent to act.
-# Your response MUST BE exactly one word: `Browser`, `Music`, or `FINISH`.
-# """
-# supervisor_prompt = ChatPromptTemplate.from_messages(
-#     [
-#         ("system", supervisor_prompt_str),
-#         MessagesPlaceholder(variable_name="messages"),
-#     ]
-# )
-
-# supervisor_chain = supervisor_prompt | llm | StrOutputParser()
-
-
-# # ==================================================================
-# # CORRECTED AGENT NODE FUNCTION
-# # This is the corrected function that finds the right message.
-# # ==================================================================
-# react_prompt = hub.pull("hwchase17/react")
-
-# def create_agent_node(llm, tools, agent_name: str):
-#     """
-#     Creates a node for a ReAct agent. This has been updated to find the
-#     correct input message for the agent.
-#     """
-#     agent = create_react_agent(llm, tools, react_prompt)
-#     executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True)
-
-#     def agent_node(state: AgentState):
-#         # Search backwards through the messages to find the last message that is
-#         # a HumanMessage or AIMessage, not the supervisor's plain string output.
-#         last_content_message = None
-#         for message in reversed(state["messages"]):
-#             if isinstance(message, BaseMessage):
-#                 last_content_message = message
-#                 break
-
-#         if last_content_message is None:
-#             raise ValueError("No valid message found in state for the agent to process.")
-
-#         # Invoke the agent with the correct content
-#         print(f"--- EXECUTING AGENT: {agent_name} ---")
-#         result = executor.invoke({"input": last_content_message.content})
-        
-#         return {"messages": [("ai", f"({agent_name} agent): {result['output']}")]}
-
-#     return agent_node
-
-# # --- Create Agent Nodes ---
-# browser_agent_node = create_agent_node(llm, browser_agent_tools, "Browser")
-# music_agent_node = create_agent_node(llm, music_agent_tools, "Music") # <--- MODIFIED: Create music agent node
-# # ==================================================================
-
-
-# def supervisor_node(state: AgentState) -> dict:
-#     """Invokes the supervisor chain and formats the output for the graph."""
-#     # Get the supervisor's decision and clean it up
-#     result = supervisor_chain.invoke(state).strip()
-
-#     # THE FIX: If the supervisor gives an empty response, we assume it's finished.
-#     if not result or not result in ["Browser", "Music", "FINISH"]: # <--- MODIFIED: More robust check
-#         print(f"--- SUPERVISOR: (invalid output '{result}', defaulting to FINISH) ---")
-#         return {"messages": ["FINISH"]}
-    
-#     print(f"--- SUPERVISOR: (decided next step is {result}) ---")
-#     return {"messages": [result]}
-
-
-# # --- Build the Graph ---
-# workflow = StateGraph(AgentState)
-
-# workflow.add_node("supervisor", supervisor_node)
-# workflow.add_node("Browser", browser_agent_node)
-# workflow.add_node("Music", music_agent_node) # <--- MODIFIED: Add the Music node to the graph
-
-# def router(state):
-#     """Routes to the correct agent based on the supervisor's decision.""" # <--- MODIFIED: Docstring and logic
-#     next_agent = state['messages'][-1]
-#     if "Browser" in next_agent:
-#         return "Browser"
-#     elif "Music" in next_agent: # <--- MODIFIED: Add routing for Music agent
-#         return "Music"
-#     else:
-#         return END
-
-# # <--- MODIFIED: Add "Music" to the conditional edges mapping
-# workflow.add_conditional_edges("supervisor", router, {"Browser": "Browser", "Music": "Music", "__end__": END})
-
-# workflow.add_edge("Browser", END)
-# workflow.add_edge("Music", END) # <--- MODIFIED: Add edge from Music back to supervisor
-
-# workflow.set_entry_point("supervisor")
-# graph = workflow.compile()
-
 # src/graph/graph_builder.py
+"""
+LangGraph Multi-Agent System with Memory Integration.
 
-# Ensure this import is at the top
-# src/graph/graph_builder.py
+This module builds the agent graph with:
+- Supervisor agent for routing
+- Specialized agents (Browser, Music, Meeting, System, Productivity)
+- Memory integration for context awareness
+"""
 
 import os
+import time
 from dotenv import load_dotenv
 
 # --- MODIFIED: Swapped Ollama for AzureChatOpenAI
@@ -147,7 +27,13 @@ from src.tools.playwright_music_tools import playwright_music_tools
 from src.tools.meeting_tools import meeting_tools
 from src.tools.system_tools import system_tools
 from src.tools.productivity_tools import productivity_tools
-from IPython.display import Image, display
+from src.utils.agent_memory import get_agent_memory, MemoryType
+
+try:
+    from IPython.display import Image, display
+    IPYTHON_AVAILABLE = True
+except ImportError:
+    IPYTHON_AVAILABLE = False
 
 
 # --- MODIFIED: Load environment variables for Azure ---
@@ -198,7 +84,7 @@ Available agents:
 - `Browser`: For tasks requiring internet access, web search, weather info, news, translation, currency conversion, word definitions, website status checks, and file downloads.
 - `Music`: For music-related tasks including playing songs on Spotify/YouTube/YouTube Music (with auto-play), controlling playback, searching lyrics, creating playlists, mood-based music, genre playlists, and music discovery.
 - `Meeting`: For Google Meet and Calendar tasks including creating instant meetings, scheduling meetings, listing upcoming meetings, joining meetings, and cancelling meetings.
-- `System`: For system control tasks including adjusting volume, controlling brightness, opening/closing applications, taking screenshots, and listing running applications.
+- `System`: For system control tasks including adjusting volume, controlling brightness, opening/closing applications, taking screenshots, listing running applications, Bluetooth control (on/off/status/settings), and WiFi control (on/off/status/settings).
 - `Productivity`: For productivity tasks including setting timers, setting alarms, listing active timers/alarms, and cancelling timers/alarms.
 - `FINISH`: If the user's question has been fully answered and the task is complete.
 
@@ -214,8 +100,19 @@ supervisor_prompt = ChatPromptTemplate.from_messages(
 supervisor_chain = supervisor_prompt | llm | StrOutputParser()
 
 # --- Agent and Graph definitions ---
+
+# Initialize memory service
+_memory = get_agent_memory()
+
+
 def create_agent_node(llm, tools, agent_name: str, custom_prompt: str = None):
-    """Creates a node for a ReAct agent using LangGraph prebuilt agent."""
+    """
+    Creates a node for a ReAct agent using LangGraph prebuilt agent.
+
+    Includes memory integration:
+    - Injects recent context into agent prompt
+    - Tracks agent actions and tool usage
+    """
     # Create a react agent graph for this specific agent
     if custom_prompt:
         agent_prompt = custom_prompt
@@ -229,6 +126,8 @@ def create_agent_node(llm, tools, agent_name: str, custom_prompt: str = None):
     )
 
     def agent_node(state: AgentState):
+        start_time = time.time()
+
         # Find the last user message
         last_content_message = None
         for message in reversed(state["messages"]):
@@ -239,15 +138,61 @@ def create_agent_node(llm, tools, agent_name: str, custom_prompt: str = None):
         if last_content_message is None:
             raise ValueError("No valid message found in state for the agent to process.")
 
-        print(f"--- EXECUTING AGENT: {agent_name} ---")
+        # Get memory context to inject
+        memory_context = _memory.get_context_for_agent(
+            agent=agent_name,
+            include_other_agents=True,
+            minutes=15,
+            max_entries=5
+        )
 
-        # Invoke the agent graph with the message
-        result = agent_graph.invoke({"messages": [last_content_message]})
+        # Prepare input with memory context
+        input_content = last_content_message.content
+        if memory_context:
+            # Prepend memory context to help agent understand what's been done
+            enhanced_input = f"{memory_context}\n[Current Request]\n{input_content}"
+            print(f"--- EXECUTING AGENT: {agent_name} (with memory context) ---")
+        else:
+            enhanced_input = input_content
+            print(f"--- EXECUTING AGENT: {agent_name} ---")
+
+        # Create enhanced message with context
+        from langchain_core.messages import HumanMessage
+        enhanced_message = HumanMessage(content=enhanced_input)
+
+        # Invoke the agent graph with the enhanced message
+        result = agent_graph.invoke({"messages": [enhanced_message]})
 
         # Extract the final AI message from the result
         final_message = result["messages"][-1]
+        output_content = final_message.content
 
-        return {"messages": [("ai", f"({agent_name} agent): {final_message.content}")]}
+        # Calculate duration
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Extract tools used from the result messages
+        tools_used = []
+        for msg in result.get("messages", []):
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    tool_name = tool_call.get("name") if isinstance(tool_call, dict) else getattr(tool_call, "name", None)
+                    if tool_name and tool_name not in tools_used:
+                        tools_used.append(tool_name)
+
+        # Store agent action in memory
+        try:
+            _memory.store_agent_action(
+                agent=agent_name,
+                input_text=input_content[:500],  # Truncate for storage
+                output_text=output_content[:500],
+                tools_used=tools_used,
+                success=True,
+                duration_ms=duration_ms
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to store agent memory: {e}")
+
+        return {"messages": [("ai", f"({agent_name} agent): {output_content}")]}
 
     return agent_node
 
@@ -332,4 +277,10 @@ workflow.add_edge("Productivity", END)
 workflow.set_entry_point("supervisor")
 
 graph = workflow.compile()
-display(Image(graph.get_graph().draw_mermaid_png()))
+
+# Display graph visualization if in IPython/Jupyter
+if IPYTHON_AVAILABLE:
+    try:
+        display(Image(graph.get_graph().draw_mermaid_png()))
+    except Exception:
+        pass  # Skip visualization if not in notebook environment
