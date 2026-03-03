@@ -2,4 +2,4 @@
 
 from .animations import UIAnimations, HoverEffect
 
-__all__ = ['UIAnimations', 'HoverEffect']
+__all__ = ["UIAnimations", "HoverEffect"]

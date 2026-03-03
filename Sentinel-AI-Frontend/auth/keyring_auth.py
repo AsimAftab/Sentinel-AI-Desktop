@@ -1,8 +1,10 @@
 import keyring
 import hashlib
+import bcrypt
 import secrets
 import json
 import time
+import threading
 from typing import Optional, Dict, Any, Tuple
 import re
 import platform
@@ -17,12 +19,34 @@ SESSION_PREFIX = "session"
 SESSION_EXPIRY_HOURS = 24
 SESSION_EXPIRY_SECONDS = SESSION_EXPIRY_HOURS * 3600
 
+# Login rate-limiting configuration
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION_SECONDS = 300  # 5 minutes
+
+# Module-level state — persists for the process lifetime
+_login_attempts: Dict[str, Dict] = {}  # {username: {count, lockout_until}}
+_login_lock = threading.Lock()
+
+
 class KeyringAuthFixed:
     @staticmethod
     def _hash_password(password: str) -> str:
-        """Hash password using SHA-256 with salt"""
-        salt = hashlib.sha256(password.encode()).hexdigest()[:16]
-        return hashlib.sha256((password + salt).encode()).hexdigest()
+        """Hash password using bcrypt with random salt (secure, slow by design)."""
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    @staticmethod
+    def _verify_password(password: str, stored_hash: str) -> bool:
+        """
+        Verify password against stored hash.
+        Supports both bcrypt (new) and SHA-256 (legacy migration path).
+        """
+        # Detect bcrypt hash by its prefix
+        if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+            return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+        # Legacy SHA-256 fallback (for existing users — triggers rehash on next login)
+        legacy_salt = hashlib.sha256(password.encode()).hexdigest()[:16]
+        legacy_hash = hashlib.sha256((password + legacy_salt).encode()).hexdigest()
+        return legacy_hash == stored_hash
 
     @staticmethod
     def _generate_token() -> str:
@@ -41,9 +65,19 @@ class KeyringAuthFixed:
         return re.match(pattern, email) is not None
 
     @staticmethod
-    def _validate_password(password: str) -> bool:
-        """Validate password strength"""
-        return len(password) >= 6
+    def _validate_password(password: str) -> Tuple[bool, str]:
+        """Validate password strength with detailed feedback."""
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters"
+        if not re.search(r"[A-Z]", password):
+            return False, "Password must contain at least one uppercase letter"
+        if not re.search(r"[a-z]", password):
+            return False, "Password must contain at least one lowercase letter"
+        if not re.search(r"\d", password):
+            return False, "Password must contain at least one digit"
+        if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]", password):
+            return False, "Password must contain at least one special character"
+        return True, "Password meets requirements"
 
     @staticmethod
     def _clean_username(username: str) -> str:
@@ -56,7 +90,7 @@ class KeyringAuthFixed:
         session_data = {
             "token": token,
             "created_at": KeyringAuthFixed._get_timestamp(),
-            "expires_at": KeyringAuthFixed._get_timestamp() + SESSION_EXPIRY_SECONDS
+            "expires_at": KeyringAuthFixed._get_timestamp() + SESSION_EXPIRY_SECONDS,
         }
         return json.dumps(session_data)
 
@@ -82,7 +116,7 @@ class KeyringAuthFixed:
             f"{service}",
             username,
             f"{service} {username}",
-            f"{service}_{username}"
+            f"{service}_{username}",
         ]
 
         success = False
@@ -96,7 +130,10 @@ class KeyringAuthFixed:
                     # Try alternative deletion methods on Windows
                     if platform.system() == "Windows":
                         import subprocess
-                        subprocess.run(f'cmdkey /delete:"{attempt}"', shell=True, capture_output=True)
+
+                        subprocess.run(
+                            f'cmdkey /delete:"{attempt}"', shell=True, capture_output=True
+                        )
                         success = True
                 except:
                     continue
@@ -104,7 +141,9 @@ class KeyringAuthFixed:
         return success
 
     @staticmethod
-    def register_user(username: str, fullname: str, phone: str, email: str, password: str) -> Tuple[bool, str]:
+    def register_user(
+        username: str, fullname: str, phone: str, email: str, password: str
+    ) -> Tuple[bool, str]:
         """Register a new user with improved validation"""
         try:
             # Clean and validate inputs
@@ -116,8 +155,9 @@ class KeyringAuthFixed:
             if not KeyringAuthFixed._validate_email(email):
                 return False, "Invalid email format"
 
-            if not KeyringAuthFixed._validate_password(password):
-                return False, "Password must be at least 6 characters"
+            pw_valid, pw_message = KeyringAuthFixed._validate_password(password)
+            if not pw_valid:
+                return False, pw_message
 
             # Check if user already exists
             existing_user = KeyringAuthFixed.get_user(username)
@@ -131,7 +171,7 @@ class KeyringAuthFixed:
                 "phone": phone,
                 "email": email,
                 "password_hash": KeyringAuthFixed._hash_password(password),
-                "created_at": KeyringAuthFixed._get_timestamp()
+                "created_at": KeyringAuthFixed._get_timestamp(),
             }
 
             # Store user data with separate service name
@@ -144,18 +184,59 @@ class KeyringAuthFixed:
             return False, f"Registration failed: {str(e)}"
 
     @staticmethod
-    def authenticate_user(username: str, password: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    def authenticate_user(
+        username: str, password: str
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """Authenticate user with improved session management"""
         try:
             username = KeyringAuthFixed._clean_username(username)
+
+            # --- Rate limiting: check lockout before touching DB ---
+            now = time.time()
+            with _login_lock:
+                attempt_data = _login_attempts.get(username, {"count": 0, "lockout_until": 0})
+                if attempt_data["lockout_until"] > now:
+                    remaining = int(attempt_data["lockout_until"] - now)
+                    return (
+                        False,
+                        f"Account temporarily locked. Try again in {remaining} seconds.",
+                        None,
+                    )
+
             user_data = KeyringAuthFixed.get_user(username)
 
             if not user_data:
                 return False, "User not found", None
 
-            password_hash = KeyringAuthFixed._hash_password(password)
-            if user_data["password_hash"] != password_hash:
+            if not KeyringAuthFixed._verify_password(password, user_data["password_hash"]):
+                # Increment failed attempt counter
+                with _login_lock:
+                    attempt_data = _login_attempts.get(username, {"count": 0, "lockout_until": 0})
+                    attempt_data["count"] += 1
+                    if attempt_data["count"] >= MAX_FAILED_ATTEMPTS:
+                        attempt_data["lockout_until"] = time.time() + LOCKOUT_DURATION_SECONDS
+                        attempt_data["count"] = 0
+                        _login_attempts[username] = attempt_data
+                        return (
+                            False,
+                            f"Too many failed attempts. Account locked for {LOCKOUT_DURATION_SECONDS // 60} minutes.",
+                            None,
+                        )
+                    _login_attempts[username] = attempt_data
                 return False, "Incorrect password", None
+
+            # Successful login — clear any previous failure record
+            with _login_lock:
+                _login_attempts.pop(username, None)
+
+            # Migrate legacy SHA-256 hash to bcrypt on successful login
+            if not (
+                user_data["password_hash"].startswith("$2b$")
+                or user_data["password_hash"].startswith("$2a$")
+            ):
+                user_data["password_hash"] = KeyringAuthFixed._hash_password(password)
+                user_key = f"{USER_DATA_PREFIX}_{username}"
+                keyring.set_password(USER_SERVICE_NAME, user_key, json.dumps(user_data))
 
             # Generate and store session with expiration
             token = KeyringAuthFixed._generate_token()

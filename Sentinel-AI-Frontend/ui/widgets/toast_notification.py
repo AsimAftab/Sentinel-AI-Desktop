@@ -46,12 +46,7 @@ class ToastNotification(QWidget):
         self.icon_label.setAlignment(Qt.AlignCenter)
         self.icon_label.setFixedSize(24, 24)
 
-        icon_map = {
-            self.SUCCESS: "✓",
-            self.ERROR: "✗",
-            self.WARNING: "⚠",
-            self.INFO: "ℹ"
-        }
+        icon_map = {self.SUCCESS: "✓", self.ERROR: "✗", self.WARNING: "⚠", self.INFO: "ℹ"}
         self.icon_label.setText(icon_map.get(self.toast_type, "ℹ"))
         self.icon_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
 
@@ -75,34 +70,34 @@ class ToastNotification(QWidget):
                 "bg": "rgba(16, 185, 129, 0.95)",
                 "border": "#10b981",
                 "text": "#ffffff",
-                "icon": "#ffffff"
+                "icon": "#ffffff",
             },
             self.ERROR: {
                 "bg": "rgba(239, 68, 68, 0.95)",
                 "border": "#ef4444",
                 "text": "#ffffff",
-                "icon": "#ffffff"
+                "icon": "#ffffff",
             },
             self.WARNING: {
                 "bg": "rgba(245, 158, 11, 0.95)",
                 "border": "#f59e0b",
                 "text": "#ffffff",
-                "icon": "#ffffff"
+                "icon": "#ffffff",
             },
             self.INFO: {
                 "bg": "rgba(79, 70, 229, 0.95)",
                 "border": "#4f46e5",
                 "text": "#ffffff",
-                "icon": "#ffffff"
-            }
+                "icon": "#ffffff",
+            },
         }
 
         scheme = color_schemes.get(self.toast_type, color_schemes[self.INFO])
 
         self.setStyleSheet(f"""
             ToastNotification {{
-                background: {scheme['bg']};
-                border: 2px solid {scheme['border']};
+                background: {scheme["bg"]};
+                border: 2px solid {scheme["border"]};
                 border-radius: 12px;
             }}
         """)
@@ -213,6 +208,7 @@ class ToastManager:
         else:
             # Fallback positioning
             from PyQt5.QtWidgets import QApplication
+
             screen = QApplication.primaryScreen().geometry()
             x = screen.right() - toast.width() - cls._margin
             y = screen.bottom() - toast.height() - cls._margin

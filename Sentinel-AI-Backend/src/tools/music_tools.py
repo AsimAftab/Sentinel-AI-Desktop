@@ -12,13 +12,17 @@ import re
 
 # Import user-specific Spotify authentication
 from src.utils.spotify_user_auth import get_user_spotify_client
+from src.utils.log_config import get_logger
 
-load_dotenv() # Load environment variables
+logger = get_logger("music")
+
+load_dotenv()  # Load environment variables
 
 # --- Spotify API Setup ---
 # NOTE: Spotify authentication is now USER-SPECIFIC!
 # Each tool will fetch the appropriate Spotify client for the current user
 # using get_user_spotify_client() which reads from user_context.json and MongoDB
+
 
 def _get_spotify_client():
     """
@@ -27,11 +31,15 @@ def _get_spotify_client():
     """
     sp = get_user_spotify_client()
     if not sp:
-        return None, ("Spotify not connected. Please connect your Spotify account in the dashboard. "
-                      "Go to Dashboard -> Spotify -> Connect to authorize your account.")
+        return None, (
+            "Spotify not connected. Please connect your Spotify account in the dashboard. "
+            "Go to Dashboard -> Spotify -> Connect to authorize your account."
+        )
     return sp, None
 
+
 # --- Tool Definitions ---
+
 
 @tool
 def search_and_play_song(song_name: str, artist_name: str = None) -> str:
@@ -46,19 +54,21 @@ def search_and_play_song(song_name: str, artist_name: str = None) -> str:
     try:
         # Check for active devices
         devices = sp.devices()
-        if not devices or not devices['devices']:
+        if not devices or not devices["devices"]:
             return "No active Spotify device found. Please open Spotify on one of your devices and start playing something."
-        
-        active_device_id = None
-        for device in devices['devices']:
-            if device['is_active']:
-                active_device_id = device['id']
-                break
-        
-        if not active_device_id:
-            # If no device is active, use the first available one.
-            active_device_id = devices['devices'][0]['id']
 
+        active_device_id = None
+        fallback_device_name = None
+        for device in devices["devices"]:
+            if device["is_active"]:
+                active_device_id = device["id"]
+                break
+
+        if not active_device_id:
+            # No active device — use first available and warn the user
+            fallback_device = devices["devices"][0]
+            active_device_id = fallback_device["id"]
+            fallback_device_name = fallback_device.get("name", "Unknown device")
 
         # Construct the search query
         query = f"track:{song_name}"
@@ -66,20 +76,24 @@ def search_and_play_song(song_name: str, artist_name: str = None) -> str:
             query += f" artist:{artist_name}"
 
         # Search for the track
-        results = sp.search(q=query, type='track', limit=1)
-        tracks = results['tracks']['items']
+        results = sp.search(q=query, type="track", limit=1)
+        tracks = results["tracks"]["items"]
 
         if not tracks:
             return f"Could not find the song '{song_name}'."
 
         # Get the track URI and play it
-        track_uri = tracks[0]['uri']
+        track_uri = tracks[0]["uri"]
         sp.start_playback(device_id=active_device_id, uris=[track_uri])
 
-        return f"Now playing '{tracks[0]['name']}' by {tracks[0]['artists'][0]['name']}."
+        msg = f"Now playing '{tracks[0]['name']}' by {tracks[0]['artists'][0]['name']}."
+        if fallback_device_name:
+            msg += f" (No active Spotify device found — playing on '{fallback_device_name}'. Open Spotify on your preferred device to transfer playback.)"
+        return msg
 
     except Exception as e:
         return f"An error occurred: {e}. I might need you to be more specific or check if a song is already playing on Spotify."
+
 
 # Fix Required
 @tool
@@ -94,23 +108,24 @@ def next_song() -> str:
     try:
         # Check for active devices
         devices = sp.devices()
-        if not devices or not devices['devices']:
+        if not devices or not devices["devices"]:
             return "No active Spotify device found. Please open Spotify on one of your devices."
-        
+
         # Skip to next track
         sp.next_track()
-        
+
         # Get current playing track info
         current_track = sp.current_playback()
-        if current_track and current_track['item']:
-            track_name = current_track['item']['name']
-            artist_name = current_track['item']['artists'][0]['name']
+        if current_track and current_track["item"]:
+            track_name = current_track["item"]["name"]
+            artist_name = current_track["item"]["artists"][0]["name"]
             return f"Skipped to next song: '{track_name}' by {artist_name}."
         else:
             return "Skipped to next song."
 
     except Exception as e:
         return f"An error occurred while skipping to next song: {e}"
+
 
 # Fix Required
 @tool
@@ -125,17 +140,17 @@ def previous_song() -> str:
     try:
         # Check for active devices
         devices = sp.devices()
-        if not devices or not devices['devices']:
+        if not devices or not devices["devices"]:
             return "No active Spotify device found. Please open Spotify on one of your devices."
-        
+
         # Skip to previous track
         sp.previous_track()
-        
+
         # Get current playing track info
         current_track = sp.current_playback()
-        if current_track and current_track['item']:
-            track_name = current_track['item']['name']
-            artist_name = current_track['item']['artists'][0]['name']
+        if current_track and current_track["item"]:
+            track_name = current_track["item"]["name"]
+            artist_name = current_track["item"]["artists"][0]["name"]
             return f"Went back to previous song: '{track_name}' by {artist_name}."
         else:
             return "Went back to previous song."
@@ -156,14 +171,14 @@ def pause_music() -> str:
     try:
         # Check if something is currently playing
         current_playback = sp.current_playback()
-        if not current_playback or not current_playback['is_playing']:
+        if not current_playback or not current_playback["is_playing"]:
             return "No music is currently playing on Spotify."
-        
+
         # Pause playback
         sp.pause_playback()
-        
-        track_name = current_playback['item']['name']
-        artist_name = current_playback['item']['artists'][0]['name']
+
+        track_name = current_playback["item"]["name"]
+        artist_name = current_playback["item"]["artists"][0]["name"]
         return f"Paused: '{track_name}' by {artist_name}."
 
     except Exception as e:
@@ -182,25 +197,26 @@ def resume_music() -> str:
     try:
         # Check current playback state
         current_playback = sp.current_playback()
-        if current_playback and current_playback['is_playing']:
-            track_name = current_playback['item']['name']
-            artist_name = current_playback['item']['artists'][0]['name']
+        if current_playback and current_playback["is_playing"]:
+            track_name = current_playback["item"]["name"]
+            artist_name = current_playback["item"]["artists"][0]["name"]
             return f"Music is already playing: '{track_name}' by {artist_name}."
-        
+
         # Resume playback
         sp.start_playback()
-        
+
         # Get track info after resuming
         current_playback = sp.current_playback()
-        if current_playback and current_playback['item']:
-            track_name = current_playback['item']['name']
-            artist_name = current_playback['item']['artists'][0]['name']
+        if current_playback and current_playback["item"]:
+            track_name = current_playback["item"]["name"]
+            artist_name = current_playback["item"]["artists"][0]["name"]
             return f"Resumed: '{track_name}' by {artist_name}."
         else:
             return "Music resumed."
 
     except Exception as e:
         return f"An error occurred while resuming music: {e}"
+
 
 # Fix Required
 @tool
@@ -219,22 +235,22 @@ def set_volume(volume_percent: int) -> str:
         # Validate volume range
         if volume_percent < 0 or volume_percent > 100:
             return "Volume must be between 0 and 100."
-        
+
         # Check for active devices
         devices = sp.devices()
-        if not devices or not devices['devices']:
+        if not devices or not devices["devices"]:
             return "No active Spotify device found. Please open Spotify on one of your devices."
-        
+
         # Get active device or use first available
         active_device_id = None
-        for device in devices['devices']:
-            if device['is_active']:
-                active_device_id = device['id']
+        for device in devices["devices"]:
+            if device["is_active"]:
+                active_device_id = device["id"]
                 break
-        
+
         if not active_device_id:
-            active_device_id = devices['devices'][0]['id']
-        
+            active_device_id = devices["devices"][0]["id"]
+
         # Set volume on the specific device
         sp.volume(volume_percent, device_id=active_device_id)
         return f"Volume set to {volume_percent}%."
@@ -261,32 +277,32 @@ def get_current_song() -> str:
 
     try:
         current_playback = sp.current_playback()
-        
+
         if not current_playback:
             return "No music information available. Make sure Spotify is open and you have an active session."
-        
-        if not current_playback['is_playing']:
-            if current_playback['item']:
-                track_name = current_playback['item']['name']
-                artist_name = current_playback['item']['artists'][0]['name']
+
+        if not current_playback["is_playing"]:
+            if current_playback["item"]:
+                track_name = current_playback["item"]["name"]
+                artist_name = current_playback["item"]["artists"][0]["name"]
                 return f"Music is paused: '{track_name}' by {artist_name}."
             else:
                 return "Music is paused."
-        
+
         # Get track information
-        track = current_playback['item']
-        track_name = track['name']
-        artist_name = track['artists'][0]['name']
-        album_name = track['album']['name']
-        
+        track = current_playback["item"]
+        track_name = track["name"]
+        artist_name = track["artists"][0]["name"]
+        album_name = track["album"]["name"]
+
         # Get progress information
-        progress_ms = current_playback['progress_ms']
-        duration_ms = track['duration_ms']
+        progress_ms = current_playback["progress_ms"]
+        duration_ms = track["duration_ms"]
         progress_min = progress_ms // 60000
         progress_sec = (progress_ms % 60000) // 1000
         duration_min = duration_ms // 60000
         duration_sec = (duration_ms % 60000) // 1000
-        
+
         return f"Currently playing: '{track_name}' by {artist_name} from the album '{album_name}'. Progress: {progress_min}:{progress_sec:02d} / {duration_min}:{duration_sec:02d}"
 
     except Exception as e:
@@ -294,6 +310,7 @@ def get_current_song() -> str:
 
 
 # --- YouTube Music Tools ---
+
 
 @tool
 def play_on_youtube_music(song_name: str, artist_name: str = None) -> str:
@@ -312,21 +329,21 @@ def play_on_youtube_music(song_name: str, artist_name: str = None) -> str:
             search_query = f"{song_name} {artist_name}"
         else:
             search_query = song_name
-        
+
         # URL encode the search query
         encoded_query = urllib.parse.quote_plus(search_query)
-        
+
         # YouTube Music search URL
         youtube_music_url = f"https://music.youtube.com/search?q={encoded_query}"
-        
+
         # Open in browser
         webbrowser.open(youtube_music_url)
-        
+
         if artist_name:
             return f"🎵 Opened YouTube Music search for '{song_name}' by {artist_name}. The first result should be your song - click the play button to start listening!"
         else:
             return f"🎵 Opened YouTube Music search for '{song_name}'. The first result should be your song - click the play button to start listening!"
-        
+
     except Exception as e:
         return f"Error opening YouTube Music: {e}"
 
@@ -348,21 +365,21 @@ def play_on_youtube(song_name: str, artist_name: str = None) -> str:
             search_query = f"{song_name} {artist_name}"
         else:
             search_query = song_name
-        
+
         # URL encode the search query
         encoded_query = urllib.parse.quote_plus(search_query)
-        
+
         # YouTube search URL that often auto-plays first result
         youtube_url = f"https://www.youtube.com/results?search_query={encoded_query}"
-        
+
         # Open in browser
         webbrowser.open(youtube_url)
-        
+
         if artist_name:
             return f"� Opened YouTube search for '{song_name}' by {artist_name}. Click on the first video to play it instantly!"
         else:
             return f"🎥 Opened YouTube search for '{song_name}'. Click on the first video to play it instantly!"
-        
+
     except Exception as e:
         return f"Error opening YouTube: {e}"
 
@@ -392,10 +409,14 @@ def play_music_smart(song_name: str, artist_name: str = None, platform: str = "a
         if sp:  # Spotify is available for this user
             try:
                 result = search_and_play_song(song_name, artist_name)
-                if "error" not in result.lower() and "failed" not in result.lower() and "not connected" not in result.lower():
+                if (
+                    "error" not in result.lower()
+                    and "failed" not in result.lower()
+                    and "not connected" not in result.lower()
+                ):
                     return result + " (via Spotify)"
-            except:
-                pass
+            except Exception as e:
+                logger.warning("Spotify playback failed, falling back to YouTube: %s", e)
 
         # If Spotify failed or unavailable, try auto-play YouTube
         return auto_play_youtube_song(song_name, artist_name)
@@ -429,7 +450,7 @@ def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
 
         # Headers to mimic a real browser
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
         # Get search results
@@ -454,7 +475,9 @@ def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
             if artist_name:
                 return f"🎵 Found and auto-playing '{song_name}' by {artist_name} on YouTube in your logged-in browser!"
             else:
-                return f"🎵 Found and auto-playing '{song_name}' on YouTube in your logged-in browser!"
+                return (
+                    f"🎵 Found and auto-playing '{song_name}' on YouTube in your logged-in browser!"
+                )
         else:
             # Fallback to regular search if no video found
             youtube_url = f"https://www.youtube.com/results?search_query={encoded_query}"
@@ -465,13 +488,16 @@ def auto_play_youtube_song(song_name: str, artist_name: str = None) -> str:
     except Exception as e:
         # Fallback to regular search if scraping fails
         try:
-            encoded_query = urllib.parse.quote_plus(f"{song_name} {artist_name}" if artist_name else song_name)
+            encoded_query = urllib.parse.quote_plus(
+                f"{song_name} {artist_name}" if artist_name else song_name
+            )
             youtube_url = f"https://www.youtube.com/results?search_query={encoded_query}"
             webbrowser.open(youtube_url)
 
             return f"🎵 Opened YouTube search for your song. Click on the first result to play it! (Auto-detection failed: {e})"
-        except:
-            return f"Error opening YouTube: {e}"
+        except Exception as e2:
+            logger.warning("YouTube fallback also failed: %s", e2)
+            return f"Error opening YouTube: {e2}"
 
 
 @tool
@@ -498,7 +524,7 @@ def auto_play_youtube_music_song(song_name: str, artist_name: str = None) -> str
 
         # Headers to mimic a real browser
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
         try:
@@ -523,10 +549,12 @@ def auto_play_youtube_music_song(song_name: str, artist_name: str = None) -> str
                 if artist_name:
                     return f"🎵 Now playing '{song_name}' by {artist_name} on YouTube Music in your logged-in browser!"
                 else:
-                    return f"🎵 Now playing '{song_name}' on YouTube Music in your logged-in browser!"
+                    return (
+                        f"🎵 Now playing '{song_name}' on YouTube Music in your logged-in browser!"
+                    )
             else:
                 # If no video ID found, try alternative pattern
-                video_id_pattern_alt = r'/watch\?v=([a-zA-Z0-9_-]{11})'
+                video_id_pattern_alt = r"/watch\?v=([a-zA-Z0-9_-]{11})"
                 matches_alt = re.findall(video_id_pattern_alt, response.text)
 
                 if matches_alt:
@@ -540,7 +568,7 @@ def auto_play_youtube_music_song(song_name: str, artist_name: str = None) -> str
                         return f"🎵 Now playing '{song_name}' on YouTube Music in your logged-in browser!"
 
         except Exception as scrape_error:
-            print(f"Scraping failed: {scrape_error}")
+            logger.debug("Scraping failed: %s", scrape_error)
 
         # Fallback: If scraping fails, try YouTube Music direct search
         # This will open the search page, but at least it's on YouTube Music
@@ -561,34 +589,17 @@ def play_youtube_music_direct(song_name: str, artist_name: str = None) -> str:
     """
     Attempts to find and play a song directly on YouTube Music with better auto-play.
     Uses a more direct approach than just search pages.
-    
+
     Args:
         song_name: The name of the song to search for
         artist_name: Optional artist name to improve search accuracy
     """
     try:
-        # Construct search query
-        if artist_name:
-            search_query = f"{song_name} {artist_name}"
-        else:
-            search_query = song_name
-        
-        # First try auto-play YouTube (often works better)
+        # Auto-play on YouTube (works better than YouTube Music for direct playback)
         youtube_result = auto_play_youtube_song(song_name, artist_name)
-        
-        # Also open YouTube Music as a backup
-        encoded_query = urllib.parse.quote_plus(search_query)
-        youtube_music_url = f"https://music.youtube.com/search?q={encoded_query}"
-        
-        # Small delay to prevent opening both at exactly the same time
-        import time
-        time.sleep(1)
-        
-        # Open YouTube Music in a new tab
-        webbrowser.open_new_tab(youtube_music_url)
-        
-        return f"{youtube_result}\n\n🎵 Also opened YouTube Music as backup - if YouTube doesn't auto-play, switch to the YouTube Music tab and click the first song!"
-        
+
+        return youtube_result
+
     except Exception as e:
         return f"Error in direct music playback: {e}"
 
@@ -601,7 +612,7 @@ def open_youtube_music() -> str:
     try:
         webbrowser.open("https://music.youtube.com")
         return "🎵 Opened YouTube Music in your browser. You can now browse and play music."
-        
+
     except Exception as e:
         return f"Error opening YouTube Music: {e}"
 
@@ -611,22 +622,22 @@ def search_youtube_music(query: str) -> str:
     """
     Opens YouTube Music with a general search query.
     Useful for searching albums, playlists, or artists.
-    
+
     Args:
         query: Search term (can be song, artist, album, or playlist)
     """
     try:
         # URL encode the search query
         encoded_query = urllib.parse.quote_plus(query)
-        
+
         # YouTube Music search URL
         youtube_music_url = f"https://music.youtube.com/search?q={encoded_query}"
-        
+
         # Open in browser
         webbrowser.open(youtube_music_url)
-        
+
         return f"🎵 Opened YouTube Music search for '{query}' in your browser. Browse the results to find what you're looking for."
-        
+
     except Exception as e:
         return f"Error searching YouTube Music: {e}"
 
@@ -635,25 +646,25 @@ def search_youtube_music(query: str) -> str:
 def play_youtube_music_playlist(playlist_name: str) -> str:
     """
     Searches for a playlist on YouTube Music and opens it in the browser.
-    
+
     Args:
         playlist_name: Name of the playlist to search for
     """
     try:
         # Add "playlist" to the search to improve results
         search_query = f"{playlist_name} playlist"
-        
+
         # URL encode the search query
         encoded_query = urllib.parse.quote_plus(search_query)
-        
+
         # YouTube Music search URL with playlist filter
         youtube_music_url = f"https://music.youtube.com/search?q={encoded_query}"
-        
+
         # Open in browser
         webbrowser.open(youtube_music_url)
-        
+
         return f"🎵 Opened YouTube Music search for '{playlist_name}' playlist in your browser. Click on the desired playlist to play it."
-        
+
     except Exception as e:
         return f"Error opening YouTube Music playlist: {e}"
 
@@ -667,7 +678,7 @@ def open_youtube_music_library() -> str:
     try:
         webbrowser.open("https://music.youtube.com/library")
         return "🎵 Opened your YouTube Music library in your browser. Here you can access your liked songs, playlists, and recently played music."
-        
+
     except Exception as e:
         return f"Error opening YouTube Music library: {e}"
 
@@ -676,7 +687,7 @@ def open_youtube_music_library() -> str:
 def create_youtube_music_station(artist_or_song: str) -> str:
     """
     Creates a radio station on YouTube Music based on an artist or song.
-    
+
     Args:
         artist_or_song: Artist name or song to base the radio station on
     """
@@ -684,11 +695,11 @@ def create_youtube_music_station(artist_or_song: str) -> str:
         # Search for the artist/song and let user create station from results
         encoded_query = urllib.parse.quote_plus(artist_or_song)
         youtube_music_url = f"https://music.youtube.com/search?q={encoded_query}"
-        
+
         webbrowser.open(youtube_music_url)
-        
+
         return f"🎵 Opened YouTube Music search for '{artist_or_song}'. Find the artist or song, then click the three dots menu and select 'Start radio' to create a station."
-        
+
     except Exception as e:
         return f"Error creating YouTube Music station: {e}"
 
@@ -709,7 +720,7 @@ def search_song_lyrics(song_name: str, artist_name: str = None) -> str:
         # Get Genius API token from environment
         # Note: User needs to set GENIUS_API_TOKEN in .env file
         # Get free token at: https://genius.com/api-clients
-        genius_token = os.getenv('GENIUS_API_TOKEN')
+        genius_token = os.getenv("GENIUS_API_TOKEN")
 
         if not genius_token:
             # Fallback to web scraping approach
@@ -734,7 +745,9 @@ def search_song_lyrics(song_name: str, artist_name: str = None) -> str:
 
             return result
         else:
-            return f"Could not find lyrics for '{song_name}'" + (f" by {artist_name}" if artist_name else "")
+            return f"Could not find lyrics for '{song_name}'" + (
+                f" by {artist_name}" if artist_name else ""
+            )
 
     except Exception as e:
         return f"Error searching for lyrics: {e}. You may need to set GENIUS_API_TOKEN in your .env file. Get a free token at https://genius.com/api-clients"
@@ -761,23 +774,21 @@ def search_lyrics_web(song_name: str, artist_name: str = None) -> str:
         # Search on Google to find Genius lyrics page
         search_url = f"https://www.google.com/search?q={encoded_query}"
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
         response = requests.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.content, 'html.parser')
+        soup = BeautifulSoup(response.content, "html.parser")
 
         # Find Genius URL from search results
         genius_link = None
-        for link in soup.find_all('a'):
-            href = link.get('href', '')
-            if 'genius.com' in href and '/lyrics' not in href:
+        for link in soup.find_all("a"):
+            href = link.get("href", "")
+            if "genius.com" in href and "/lyrics" not in href:
                 # Extract actual URL from Google's redirect
-                if 'url?q=' in href:
-                    genius_link = href.split('url?q=')[1].split('&')[0]
+                if "url?q=" in href:
+                    genius_link = href.split("url?q=")[1].split("&")[0]
                     genius_link = urllib.parse.unquote(genius_link)
                     break
 
@@ -816,26 +827,26 @@ def play_genre_playlist(genre: str, platform: str = "youtube_music") -> str:
         sp, _ = _get_spotify_client()
         if platform == "spotify" and sp:
             # Search for genre playlist on Spotify
-            results = sp.search(q=f"{genre}", type='playlist', limit=1)
-            playlists = results['playlists']['items']
+            results = sp.search(q=f"{genre}", type="playlist", limit=1)
+            playlists = results["playlists"]["items"]
 
             if playlists:
-                playlist_uri = playlists[0]['uri']
-                playlist_name = playlists[0]['name']
+                playlist_uri = playlists[0]["uri"]
+                playlist_name = playlists[0]["name"]
 
                 # Check for active devices
                 devices = sp.devices()
-                if not devices or not devices['devices']:
+                if not devices or not devices["devices"]:
                     return "No active Spotify device found. Please open Spotify on one of your devices."
 
                 active_device_id = None
-                for device in devices['devices']:
-                    if device['is_active']:
-                        active_device_id = device['id']
+                for device in devices["devices"]:
+                    if device["is_active"]:
+                        active_device_id = device["id"]
                         break
 
                 if not active_device_id:
-                    active_device_id = devices['devices'][0]['id']
+                    active_device_id = devices["devices"][0]["id"]
 
                 sp.start_playback(device_id=active_device_id, context_uri=playlist_uri)
                 return f"🎵 Playing {genre} playlist: '{playlist_name}' on Spotify!"
@@ -854,7 +865,9 @@ def play_genre_playlist(genre: str, platform: str = "youtube_music") -> str:
             encoded_genre = urllib.parse.quote_plus(f"{genre} music playlist")
             url = f"https://www.youtube.com/results?search_query={encoded_genre}"
             webbrowser.open(url)
-            return f"🎵 Opened YouTube with {genre} playlists. Click on a playlist to start listening!"
+            return (
+                f"🎵 Opened YouTube with {genre} playlists. Click on a playlist to start listening!"
+            )
 
     except Exception as e:
         return f"Error playing genre playlist: {e}"
@@ -880,7 +893,7 @@ def play_mood_music(mood: str) -> str:
             "happy": "happy upbeat music",
             "sad": "sad emotional music",
             "romantic": "romantic love songs",
-            "energetic": "energetic upbeat music"
+            "energetic": "energetic upbeat music",
         }
 
         search_query = mood_queries.get(mood.lower(), f"{mood} music")
@@ -889,28 +902,28 @@ def play_mood_music(mood: str) -> str:
         sp, _ = _get_spotify_client()
         if sp:
             try:
-                results = sp.search(q=search_query, type='playlist', limit=1)
-                playlists = results['playlists']['items']
+                results = sp.search(q=search_query, type="playlist", limit=1)
+                playlists = results["playlists"]["items"]
 
                 if playlists:
-                    playlist_uri = playlists[0]['uri']
-                    playlist_name = playlists[0]['name']
+                    playlist_uri = playlists[0]["uri"]
+                    playlist_name = playlists[0]["name"]
 
                     devices = sp.devices()
-                    if devices and devices['devices']:
+                    if devices and devices["devices"]:
                         active_device_id = None
-                        for device in devices['devices']:
-                            if device['is_active']:
-                                active_device_id = device['id']
+                        for device in devices["devices"]:
+                            if device["is_active"]:
+                                active_device_id = device["id"]
                                 break
 
                         if not active_device_id:
-                            active_device_id = devices['devices'][0]['id']
+                            active_device_id = devices["devices"][0]["id"]
 
                         sp.start_playback(device_id=active_device_id, context_uri=playlist_uri)
                         return f"🎵 Playing {mood} music: '{playlist_name}' on Spotify!"
-            except:
-                pass
+            except Exception as e:
+                logger.warning("Spotify mood music failed, falling back to YouTube Music: %s", e)
 
         # Fallback to YouTube Music
         encoded_query = urllib.parse.quote_plus(search_query + " playlist")
@@ -936,21 +949,24 @@ def discover_new_music(based_on: str = None) -> str:
             try:
                 if based_on:
                     # Search for the artist/genre
-                    results = sp.search(q=based_on, type='artist', limit=1)
-                    if results['artists']['items']:
-                        artist_id = results['artists']['items'][0]['id']
+                    results = sp.search(q=based_on, type="artist", limit=1)
+                    if results["artists"]["items"]:
+                        artist_id = results["artists"]["items"][0]["id"]
 
                         # Get related artists
                         related = sp.artist_related_artists(artist_id)
 
                         result = f"🎵 **Artists similar to {based_on}:**\n\n"
-                        for i, artist in enumerate(related['artists'][:5], 1):
+                        for i, artist in enumerate(related["artists"][:5], 1):
                             result += f"{i}. {artist['name']}\n"
 
                         # Open Spotify artist radio
                         devices = sp.devices()
-                        if devices and devices['devices']:
-                            return result + f"\n\nTip: Use 'create radio station based on {based_on}' to start a discovery playlist!"
+                        if devices and devices["devices"]:
+                            return (
+                                result
+                                + f"\n\nTip: Use 'create radio station based on {based_on}' to start a discovery playlist!"
+                            )
 
                         return result
                 else:
@@ -958,8 +974,8 @@ def discover_new_music(based_on: str = None) -> str:
                     # For now, just open Spotify's Discover page
                     webbrowser.open("https://open.spotify.com/genre/discover-page")
                     return "🎵 Opened Spotify's Discover page where you can find personalized music recommendations!"
-            except:
-                pass
+            except Exception as e:
+                logger.warning("Spotify discovery failed, falling back to YouTube Music: %s", e)
 
         # Fallback to YouTube Music
         if based_on:
@@ -985,10 +1001,9 @@ music_tools = [
     resume_music,
     set_volume,
     get_current_song,
-
     # Enhanced YouTube tools with auto-play (uses existing logged-in browser)
     auto_play_youtube_music_song,  # BEST for YouTube Music - uses logged-in browser
-    auto_play_youtube_song,         # BEST for YouTube - uses logged-in browser
+    auto_play_youtube_song,  # BEST for YouTube - uses logged-in browser
     play_music_smart,  # Primary smart tool that tries multiple platforms
     play_youtube_music_direct,  # Auto-play with YouTube Music backup
     play_on_youtube_music,
@@ -998,11 +1013,10 @@ music_tools = [
     play_youtube_music_playlist,
     open_youtube_music_library,
     create_youtube_music_station,
-
     # New enhanced tools
     search_song_lyrics,
     search_lyrics_web,
     play_genre_playlist,
     play_mood_music,
-    discover_new_music
+    discover_new_music,
 ]

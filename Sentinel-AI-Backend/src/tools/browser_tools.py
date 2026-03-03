@@ -1,136 +1,138 @@
 # src/tools/browser_tools.py
+"""
+Browser / Web tools — all HTTP-bound tools are async (httpx.AsyncClient).
+Tavily (sync SDK) is offloaded to a thread pool via asyncio.to_thread().
 
-import requests
-import webbrowser
+LangGraph calls async tools with `await` when the graph is invoked via
+`astream()` / `ainvoke()`, keeping the event loop free during network I/O.
+"""
+
+import asyncio
 import os
+import webbrowser
+import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from langchain_core.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# --- Enhanced Search Tools ---
+# Shared httpx headers to mimic a real browser
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
+
+
+# ---------------------------------------------------------------------------
+# Private async helper — Tavily uses a sync SDK so we offload to thread pool
+# ---------------------------------------------------------------------------
+
+
+async def _tavily_search(query: str, max_results: int) -> list:
+    """Run Tavily search in a thread pool to avoid blocking the event loop."""
+
+    def _sync():
+        tavily = TavilySearchResults(max_results=max_results)
+        return tavily.run(query)
+
+    return await asyncio.to_thread(_sync)
+
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+
 
 @tool
-def tavily_web_search(query: str, max_results: int = 5) -> str:
+async def tavily_web_search(query: str, max_results: int = 5) -> str:
     """
     Performs a comprehensive web search using Tavily API.
     Returns detailed search results with summaries and sources.
-    
+
     Args:
         query: The search query
         max_results: Number of results to return (1-10)
     """
     try:
-        if max_results < 1 or max_results > 10:
-            max_results = 5
-        
-        tavily = TavilySearchResults(max_results=max_results)
-        results = tavily.run(query)
-        
+        max_results = max(1, min(10, max_results))
+        results = await _tavily_search(query, max_results)
+
         if not results:
             return f"No search results found for: {query}"
-        
-        # Format results nicely
-        formatted_results = f"🔍 Search Results for: '{query}'\n\n"
-        
+
+        formatted = f"🔍 Search Results for: '{query}'\n\n"
         if isinstance(results, list):
             for i, result in enumerate(results, 1):
                 if isinstance(result, dict):
-                    title = result.get('title', 'No title')
-                    url = result.get('url', 'No URL')
-                    content = result.get('content', 'No content available')
-                    
-                    formatted_results += f"{i}. **{title}**\n"
-                    formatted_results += f"   URL: {url}\n"
-                    formatted_results += f"   Summary: {content[:200]}...\n\n"
+                    title = result.get("title", "No title")
+                    url = result.get("url", "No URL")
+                    content = result.get("content", "No content available")
+                    formatted += f"{i}. **{title}**\n"
+                    formatted += f"   URL: {url}\n"
+                    formatted += f"   Summary: {content[:200]}...\n\n"
                 else:
-                    formatted_results += f"{i}. {str(result)}\n\n"
+                    formatted += f"{i}. {str(result)}\n\n"
         else:
-            formatted_results += str(results)
-        
-        return formatted_results
-        
+            formatted += str(results)
+
+        return formatted
     except Exception as e:
         return f"Error performing web search: {e}"
 
 
 @tool
-def scrape_webpage(url: str) -> str:
+async def scrape_webpage(url: str) -> str:
     """
     Scrapes and extracts text content from a webpage.
-    Returns the main text content, title, and metadata.
-    
+
     Args:
         url: The URL of the webpage to scrape
     """
     try:
-        # Validate URL
         parsed_url = urlparse(url)
         if not parsed_url.scheme or not parsed_url.netloc:
             return "Invalid URL provided. Please include http:// or https://"
-        
-        # Set headers to mimic a real browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        # Make request with timeout
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        # Parse HTML
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Extract title
-        title = soup.find('title')
+
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=10, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        title = soup.find("title")
         title_text = title.get_text().strip() if title else "No title found"
-        
-        # Remove script and style elements
-        for script in soup(["script", "style", "nav", "footer", "header"]):
-            script.decompose()
-        
-        # Extract main content
+
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+
         main_content = ""
-        
-        # Try to find main content areas
-        content_selectors = [
-            'article', 'main', '.content', '#content', 
-            '.post', '.entry-content', '.article-body'
-        ]
-        
-        for selector in content_selectors:
-            content_area = soup.select_one(selector)
-            if content_area:
-                main_content = content_area.get_text(separator='\n', strip=True)
+        for selector in ["article", "main", ".content", "#content", ".post", ".entry-content"]:
+            area = soup.select_one(selector)
+            if area:
+                main_content = area.get_text(separator="\n", strip=True)
                 break
-        
-        # If no specific content area found, get body text
+
         if not main_content:
-            body = soup.find('body')
+            body = soup.find("body")
             if body:
-                main_content = body.get_text(separator='\n', strip=True)
-        
-        # Clean up the text
-        lines = [line.strip() for line in main_content.split('\n') if line.strip()]
-        cleaned_content = '\n'.join(lines)
-        
-        # Truncate if too long
-        if len(cleaned_content) > 2000:
-            cleaned_content = cleaned_content[:2000] + "... [Content truncated]"
-        
-        result = f"📄 **{title_text}**\n"
-        result += f"🔗 URL: {url}\n\n"
-        result += f"📝 **Content:**\n{cleaned_content}"
-        
-        return result
-        
-    except requests.exceptions.Timeout:
-        return f"Timeout error: The webpage took too long to respond - {url}"
-    except requests.exceptions.RequestException as e:
+                main_content = body.get_text(separator="\n", strip=True)
+
+        lines = [l.strip() for l in main_content.split("\n") if l.strip()]
+        cleaned = "\n".join(lines)
+        if len(cleaned) > 2000:
+            cleaned = cleaned[:2000] + "... [Content truncated]"
+
+        return f"📄 **{title_text}**\n🔗 URL: {url}\n\n📝 **Content:**\n{cleaned}"
+
+    except httpx.TimeoutException:
+        return f"Timeout error: The webpage took too long to respond — {url}"
+    except httpx.RequestError as e:
         return f"Error accessing webpage: {e}"
     except Exception as e:
         return f"Error scraping webpage: {e}"
@@ -140,113 +142,94 @@ def scrape_webpage(url: str) -> str:
 def open_webpage_in_browser(url: str) -> str:
     """
     Opens a webpage in the default system browser.
-    
+
     Args:
         url: The URL to open in the browser
     """
     try:
-        # Validate URL
         parsed_url = urlparse(url)
         if not parsed_url.scheme:
-            # Add https if no scheme provided
             url = f"https://{url}"
-        
         webbrowser.open(url)
         return f"✅ Opened {url} in your default browser."
-        
     except Exception as e:
         return f"Error opening webpage in browser: {e}"
 
 
 @tool
-def search_and_open(query: str, open_first: bool = False) -> str:
+async def search_and_open(query: str, open_first: bool = False) -> str:
     """
     Searches the web and optionally opens the first result in browser.
-    
+
     Args:
         query: The search query
         open_first: Whether to open the first result in browser
     """
     try:
-        # Perform search
-        search_results = tavily_web_search(query, max_results=3)
-        
-        if open_first and "URL:" in search_results:
-            # Extract first URL from results
-            lines = search_results.split('\n')
-            first_url = None
-            
-            for line in lines:
-                if "URL:" in line:
-                    first_url = line.replace("URL:", "").strip()
-                    break
-            
-            if first_url:
-                webbrowser.open(first_url)
-                return f"{search_results}\n\n✅ Opened first result ({first_url}) in your browser."
-        
-        return search_results
-        
+        results = await _tavily_search(query, 3)
+
+        formatted = f"🔍 Search Results for: '{query}'\n\n"
+        first_url = None
+        if isinstance(results, list):
+            for i, result in enumerate(results, 1):
+                if isinstance(result, dict):
+                    title = result.get("title", "No title")
+                    url = result.get("url", "No URL")
+                    content = result.get("content", "")
+                    if i == 1:
+                        first_url = url
+                    formatted += f"{i}. **{title}**\n   URL: {url}\n   {content[:200]}...\n\n"
+
+        if open_first and first_url:
+            webbrowser.open(first_url)
+            formatted += f"\n✅ Opened first result ({first_url}) in your browser."
+
+        return formatted
     except Exception as e:
         return f"Error in search and open: {e}"
 
 
 @tool
-def get_page_links(url: str, limit: int = 10) -> str:
+async def get_page_links(url: str, limit: int = 10) -> str:
     """
     Extracts all links from a webpage.
-    
+
     Args:
         url: The URL of the webpage
         limit: Maximum number of links to return
     """
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Find all links
-        links = soup.find_all('a', href=True)
-        
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=10, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        links = soup.find_all("a", href=True)
+
         result = f"🔗 **Links found on {url}:**\n\n"
         count = 0
-        
         for link in links:
             if count >= limit:
                 break
-                
-            href = link['href']
+            href = link["href"]
             text = link.get_text(strip=True)
-            
-            # Convert relative URLs to absolute
-            if href.startswith('/'):
+            if href.startswith("/"):
                 href = urljoin(url, href)
-            elif not href.startswith('http'):
+            elif not href.startswith("http"):
                 continue
-            
             if text:
                 result += f"{count + 1}. [{text}]({href})\n"
             else:
                 result += f"{count + 1}. {href}\n"
-            
             count += 1
-        
-        if count == 0:
-            return f"No links found on {url}"
-        
-        return result
-        
+
+        return result if count > 0 else f"No links found on {url}"
     except Exception as e:
         return f"Error extracting links: {e}"
 
 
 @tool
-def download_file(url: str, filename: str = None) -> str:
+async def download_file(url: str, filename: str = None) -> str:
     """
     Downloads a file from a URL to the local system.
 
@@ -255,85 +238,68 @@ def download_file(url: str, filename: str = None) -> str:
         filename: Optional custom filename (will use URL filename if not provided)
     """
     try:
-        response = requests.get(url, stream=True, timeout=30)
-        response.raise_for_status()
-
-        # Determine filename
         if not filename:
-            filename = url.split('/')[-1]
-            if not filename or '.' not in filename:
+            filename = url.split("/")[-1]
+            if not filename or "." not in filename:
                 filename = "downloaded_file"
 
-        # Create downloads directory if it doesn't exist
+        filename = os.path.basename(filename)
+        if not filename:
+            filename = "downloaded_file"
+
         downloads_dir = "downloads"
         os.makedirs(downloads_dir, exist_ok=True)
-
         filepath = os.path.join(downloads_dir, filename)
 
-        # Download file
-        with open(filepath, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+        if not os.path.abspath(filepath).startswith(os.path.abspath(downloads_dir) + os.sep):
+            return "Error: Invalid filename — path traversal detected."
+
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                with open(filepath, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        f.write(chunk)
 
         file_size = os.path.getsize(filepath)
-        file_size_mb = file_size / (1024 * 1024)
-
-        return f"✅ Downloaded {filename} ({file_size_mb:.2f} MB) to {filepath}"
-
+        return f"✅ Downloaded {filename} ({file_size / (1024 * 1024):.2f} MB) to {filepath}"
     except Exception as e:
         return f"Error downloading file: {e}"
 
 
 @tool
-def get_weather(location: str) -> str:
+async def get_weather(location: str) -> str:
     """
-    Gets current weather information for a specified location.
-    Uses wttr.in free weather API.
+    Gets current weather information for a specified location using wttr.in.
 
     Args:
         location: City name or location (e.g., "London", "New York", "Tokyo")
     """
     try:
-        # Use wttr.in API (no API key required)
         url = f"https://wttr.in/{location}?format=j1"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=10) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
 
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        data = response.json()
-
-        # Extract current weather
-        current = data['current_condition'][0]
-        temp_c = current['temp_C']
-        temp_f = current['temp_F']
-        feels_like_c = current['FeelsLikeC']
-        feels_like_f = current['FeelsLikeF']
-        weather_desc = current['weatherDesc'][0]['value']
-        humidity = current['humidity']
-        wind_speed = current['windspeedKmph']
-
-        # Extract location info
-        location_info = data['nearest_area'][0]
-        area_name = location_info['areaName'][0]['value']
-        country = location_info['country'][0]['value']
+        current = data["current_condition"][0]
+        loc_info = data["nearest_area"][0]
+        area_name = loc_info["areaName"][0]["value"]
+        country = loc_info["country"][0]["value"]
 
         result = f"🌤️ **Weather for {area_name}, {country}**\n\n"
-        result += f"🌡️ Temperature: {temp_c}°C / {temp_f}°F (Feels like: {feels_like_c}°C / {feels_like_f}°F)\n"
-        result += f"☁️ Conditions: {weather_desc}\n"
-        result += f"💧 Humidity: {humidity}%\n"
-        result += f"💨 Wind Speed: {wind_speed} km/h\n"
-
+        result += f"🌡️ Temperature: {current['temp_C']}°C / {current['temp_F']}°F"
+        result += f" (Feels like: {current['FeelsLikeC']}°C / {current['FeelsLikeF']}°F)\n"
+        result += f"☁️ Conditions: {current['weatherDesc'][0]['value']}\n"
+        result += f"💧 Humidity: {current['humidity']}%\n"
+        result += f"💨 Wind Speed: {current['windspeedKmph']} km/h\n"
         return result
-
     except Exception as e:
         return f"Error getting weather: {e}. Please check the location name and try again."
 
 
 @tool
-def get_weather_forecast(location: str, days: int = 3) -> str:
+async def get_weather_forecast(location: str, days: int = 3) -> str:
     """
     Gets weather forecast for a specified location.
 
@@ -342,111 +308,90 @@ def get_weather_forecast(location: str, days: int = 3) -> str:
         days: Number of days to forecast (1-3)
     """
     try:
-        if days < 1 or days > 3:
-            days = 3
-
+        days = max(1, min(3, days))
         url = f"https://wttr.in/{location}?format=j1"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=10) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
 
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        data = response.json()
-
-        # Extract location info
-        location_info = data['nearest_area'][0]
-        area_name = location_info['areaName'][0]['value']
-        country = location_info['country'][0]['value']
+        loc_info = data["nearest_area"][0]
+        area_name = loc_info["areaName"][0]["value"]
+        country = loc_info["country"][0]["value"]
 
         result = f"📅 **{days}-Day Weather Forecast for {area_name}, {country}**\n\n"
-
-        for i in range(min(days, len(data['weather']))):
-            day_data = data['weather'][i]
-            date = day_data['date']
-            max_temp_c = day_data['maxtempC']
-            min_temp_c = day_data['mintempC']
-            max_temp_f = day_data['maxtempF']
-            min_temp_f = day_data['mintempF']
-
-            # Get midday weather description
-            hourly = day_data['hourly'][4]  # 12:00 PM
-            desc = hourly['weatherDesc'][0]['value']
-
-            result += f"📆 **{date}**\n"
-            result += f"   🌡️ High: {max_temp_c}°C / {max_temp_f}°F | Low: {min_temp_c}°C / {min_temp_f}°F\n"
-            result += f"   ☁️ {desc}\n\n"
-
+        for i in range(min(days, len(data["weather"]))):
+            day = data["weather"][i]
+            hourly = day["hourly"][4]  # midday
+            result += f"📆 **{day['date']}**\n"
+            result += f"   🌡️ High: {day['maxtempC']}°C / {day['maxtempF']}°F"
+            result += f" | Low: {day['mintempC']}°C / {day['mintempF']}°F\n"
+            result += f"   ☁️ {hourly['weatherDesc'][0]['value']}\n\n"
         return result
-
     except Exception as e:
         return f"Error getting weather forecast: {e}"
 
 
 @tool
-def get_latest_news(topic: str = None, max_results: int = 5) -> str:
+async def get_latest_news(topic: str = None, max_results: int = 5) -> str:
     """
     Gets the latest news headlines using Tavily search.
 
     Args:
-        topic: Optional topic to search for (e.g., "technology", "sports", "politics")
+        topic: Optional topic to search for (e.g., "technology", "sports")
         max_results: Number of news items to return (1-10)
     """
     try:
-        if max_results < 1 or max_results > 10:
-            max_results = 5
+        max_results = max(1, min(10, max_results))
+        query = f"latest news about {topic}" if topic else "latest news headlines today"
+        results = await _tavily_search(query, max_results)
 
-        # Use Tavily for news search
-        if topic:
-            query = f"latest news about {topic}"
+        formatted = f"🔍 Search Results for: '{query}'\n\n"
+        if isinstance(results, list):
+            for i, result in enumerate(results, 1):
+                if isinstance(result, dict):
+                    title = result.get("title", "No title")
+                    url = result.get("url", "No URL")
+                    content = result.get("content", "")
+                    formatted += f"{i}. **{title}**\n   URL: {url}\n   {content[:200]}...\n\n"
+                else:
+                    formatted += f"{i}. {str(result)}\n\n"
         else:
-            query = "latest news headlines today"
+            formatted += str(results)
 
-        search_result = tavily_web_search(query, max_results=max_results)
-
-        return f"📰 **Latest News**\n\n{search_result}"
-
+        return f"📰 **Latest News**\n\n{formatted}"
     except Exception as e:
         return f"Error getting news: {e}"
 
 
 @tool
-def translate_text(text: str, target_language: str = "en") -> str:
+async def translate_text(text: str, target_language: str = "en") -> str:
     """
-    Translates text to the specified target language using a free translation API.
+    Translates text to the specified target language using MyMemory API.
 
     Args:
         text: Text to translate
-        target_language: Target language code (e.g., "en", "es", "fr", "de", "ja", "zh")
+        target_language: Target language code (e.g., "en", "es", "fr", "de", "ja")
     """
     try:
-        # Use MyMemory Translation API (free, no key required)
         url = "https://api.mymemory.translated.net/get"
-        params = {
-            'q': text,
-            'langpair': f"auto|{target_language}"
-        }
+        params = {"q": text, "langpair": f"auto|{target_language}"}
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
 
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data['responseStatus'] == 200:
-            translated = data['responseData']['translatedText']
-            detected_lang = data['responseData'].get('detectedLanguage', 'unknown')
-
-            return f"🌐 **Translation**\n\n📝 Original: {text}\n✅ Translated ({detected_lang} → {target_language}): {translated}"
-        else:
-            return f"Translation failed. Please check the language code and try again."
-
+        if data["responseStatus"] == 200:
+            translated = data["responseData"]["translatedText"]
+            detected = data["responseData"].get("detectedLanguage", "unknown")
+            return f"🌐 **Translation**\n\n📝 Original: {text}\n✅ Translated ({detected} → {target_language}): {translated}"
+        return "Translation failed. Please check the language code and try again."
     except Exception as e:
         return f"Error translating text: {e}"
 
 
 @tool
-def get_currency_exchange(amount: float, from_currency: str, to_currency: str) -> str:
+async def get_currency_exchange(amount: float, from_currency: str, to_currency: str) -> str:
     """
     Converts currency amounts using live exchange rates.
 
@@ -456,29 +401,31 @@ def get_currency_exchange(amount: float, from_currency: str, to_currency: str) -
         to_currency: Target currency code
     """
     try:
-        # Use exchangerate.host API (free, no key required)
-        url = f"https://api.exchangerate.host/convert?from={from_currency}&to={to_currency}&amount={amount}"
+        from_code = from_currency.upper()
+        to_code = to_currency.upper()
+        url = f"https://api.frankfurter.app/latest?amount={amount}&from={from_code}&to={to_code}"
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
 
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get('success'):
-            result_amount = data['result']
-            rate = data['info']['rate']
-            date = data['date']
-
-            return f"💱 **Currency Conversion**\n\n{amount} {from_currency} = {result_amount:.2f} {to_currency}\n📊 Exchange Rate: 1 {from_currency} = {rate:.4f} {to_currency}\n📅 Date: {date}"
-        else:
-            return f"Currency conversion failed. Please check the currency codes."
-
+        rates = data.get("rates", {})
+        if to_code in rates:
+            converted = rates[to_code]
+            rate = converted / amount if amount else 0
+            return (
+                f"**Currency Conversion**\n\n"
+                f"{amount} {from_code} = {converted:.2f} {to_code}\n"
+                f"Exchange Rate: 1 {from_code} = {rate:.4f} {to_code}\n"
+                f"Date: {data.get('date', 'N/A')}"
+            )
+        return "Currency conversion failed. Please check the currency codes."
     except Exception as e:
         return f"Error converting currency: {e}"
 
 
 @tool
-def get_definition(word: str) -> str:
+async def get_definition(word: str) -> str:
     """
     Gets the definition of a word using a dictionary API.
 
@@ -486,45 +433,33 @@ def get_definition(word: str) -> str:
         word: Word to define
     """
     try:
-        # Use Free Dictionary API
         url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
 
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data and len(data) > 0:
-            entry = data[0]
-            word_text = entry['word']
-            phonetic = entry.get('phonetic', '')
-
-            result = f"📖 **Definition of '{word_text}'**\n"
-            if phonetic:
-                result += f"🔊 Pronunciation: {phonetic}\n\n"
-            else:
-                result += "\n"
-
-            # Get first 3 meanings
-            meanings_count = min(3, len(entry['meanings']))
-            for i in range(meanings_count):
-                meaning = entry['meanings'][i]
-                part_of_speech = meaning['partOfSpeech']
-                definition = meaning['definitions'][0]['definition']
-
-                result += f"**{part_of_speech.capitalize()}:**\n"
-                result += f"  • {definition}\n\n"
-
-                # Add example if available
-                if 'example' in meaning['definitions'][0]:
-                    example = meaning['definitions'][0]['example']
-                    result += f"  📝 Example: \"{example}\"\n\n"
-
-            return result
-        else:
+        if not data:
             return f"No definition found for '{word}'."
 
-    except requests.exceptions.HTTPError as e:
+        entry = data[0]
+        word_text = entry["word"]
+        phonetic = entry.get("phonetic", "")
+
+        result = f"📖 **Definition of '{word_text}'**\n"
+        result += f"🔊 Pronunciation: {phonetic}\n\n" if phonetic else "\n"
+
+        for i in range(min(3, len(entry["meanings"]))):
+            meaning = entry["meanings"][i]
+            pos = meaning["partOfSpeech"]
+            defn = meaning["definitions"][0]["definition"]
+            result += f"**{pos.capitalize()}:**\n  • {defn}\n"
+            if "example" in meaning["definitions"][0]:
+                result += f'  📝 Example: "{meaning["definitions"][0]["example"]}"\n'
+            result += "\n"
+
+        return result
+    except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             return f"Word '{word}' not found in dictionary."
         return f"Error getting definition: {e}"
@@ -533,7 +468,7 @@ def get_definition(word: str) -> str:
 
 
 @tool
-def check_website_status(url: str) -> str:
+async def check_website_status(url: str) -> str:
     """
     Checks if a website is online and responding, and provides response time.
 
@@ -541,59 +476,204 @@ def check_website_status(url: str) -> str:
         url: URL of the website to check
     """
     try:
-        import time as time_module
+        import time as _time
 
-        # Ensure URL has scheme
         parsed_url = urlparse(url)
         if not parsed_url.scheme:
             url = f"https://{url}"
 
-        start_time = time_module.time()
-        response = requests.get(url, timeout=10)
-        end_time = time_module.time()
+        start = _time.monotonic()
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            response = await client.get(url)
+        elapsed_ms = (_time.monotonic() - start) * 1000
 
-        response_time = (end_time - start_time) * 1000  # Convert to milliseconds
-
-        result = f"🌐 **Website Status Check**\n\n"
-        result += f"🔗 URL: {url}\n"
-        result += f"✅ Status: Online ({response.status_code})\n"
-        result += f"⏱️ Response Time: {response_time:.2f} ms\n"
-        result += f"📄 Content Length: {len(response.content)} bytes\n"
-
-        return result
-
-    except requests.exceptions.Timeout:
+        return (
+            f"🌐 **Website Status Check**\n\n"
+            f"🔗 URL: {url}\n"
+            f"✅ Status: Online ({response.status_code})\n"
+            f"⏱️ Response Time: {elapsed_ms:.2f} ms\n"
+            f"📄 Content Length: {len(response.content)} bytes"
+        )
+    except httpx.TimeoutException:
         return f"⏰ Timeout: {url} took too long to respond (>10 seconds)."
-    except requests.exceptions.ConnectionError:
-        return f"❌ Connection Error: Unable to connect to {url}. The website might be down or the URL is incorrect."
+    except httpx.ConnectError:
+        return f"❌ Connection Error: Unable to connect to {url}. The website might be down."
     except Exception as e:
         return f"❌ Error checking website: {e}"
 
 
 @tool
-def shorten_url(long_url: str) -> str:
+async def shorten_url(long_url: str) -> str:
     """
-    Shortens a long URL using a URL shortening service.
+    Shortens a long URL using TinyURL.
 
     Args:
         long_url: The long URL to shorten
     """
     try:
-        # Use TinyURL API (free, no key required)
         api_url = f"http://tinyurl.com/api-create.php?url={long_url}"
-
-        response = requests.get(api_url, timeout=10)
-        response.raise_for_status()
-
-        short_url = response.text.strip()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(api_url)
+            response.raise_for_status()
+            short_url = response.text.strip()
 
         return f"🔗 **URL Shortened**\n\n📎 Original: {long_url}\n✂️ Shortened: {short_url}"
-
     except Exception as e:
         return f"Error shortening URL: {e}"
 
 
-# Enhanced browser tools list
+@tool
+async def search_wikipedia(query: str, sentences: int = 5) -> str:
+    """
+    Searches Wikipedia and returns a summary of the topic.
+
+    Args:
+        query: Topic or question to look up on Wikipedia
+        sentences: Number of sentences to return in the summary (1-10)
+    """
+    try:
+        sentences = max(1, min(10, sentences))
+        api_url = "https://en.wikipedia.org/w/api.php"
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Step 1: search for the article title
+            search_resp = await client.get(
+                api_url,
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "format": "json",
+                    "srlimit": 1,
+                },
+            )
+            search_resp.raise_for_status()
+            results = search_resp.json().get("query", {}).get("search", [])
+            if not results:
+                return f"No Wikipedia article found for: {query}"
+
+            page_title = results[0]["title"]
+
+            # Step 2: fetch the article extract
+            extract_resp = await client.get(
+                api_url,
+                params={
+                    "action": "query",
+                    "titles": page_title,
+                    "prop": "extracts",
+                    "exsentences": sentences,
+                    "exintro": True,
+                    "explaintext": True,
+                    "format": "json",
+                },
+            )
+            extract_resp.raise_for_status()
+            pages = extract_resp.json().get("query", {}).get("pages", {})
+            page = next(iter(pages.values()))
+            extract = page.get("extract", "No content available.")
+
+        wiki_url = f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
+        return f"📚 **Wikipedia: {page_title}**\n\n{extract}\n\n🔗 Read more: {wiki_url}"
+    except Exception as e:
+        return f"Error fetching Wikipedia article: {e}"
+
+
+@tool
+async def get_stock_price(ticker: str) -> str:
+    """
+    Gets the current stock price and basic info for a given ticker symbol.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., AAPL, TSLA, MSFT, GOOGL)
+    """
+    try:
+        ticker = ticker.upper().strip()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"}, timeout=10) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+        result_data = data.get("chart", {}).get("result", [])
+        if not result_data:
+            return f"No data found for ticker: {ticker}. Check the symbol and try again."
+
+        meta = result_data[0].get("meta", {})
+        current_price = meta.get("regularMarketPrice", "N/A")
+        prev_close = meta.get("chartPreviousClose", meta.get("previousClose", "N/A"))
+        currency = meta.get("currency", "USD")
+        name = meta.get("longName") or meta.get("shortName") or ticker
+        exchange = meta.get("exchangeName", "")
+
+        change = ""
+        if current_price != "N/A" and prev_close != "N/A":
+            diff = current_price - prev_close
+            pct = (diff / prev_close) * 100
+            arrow = "📈" if diff >= 0 else "📉"
+            change = f"{arrow} Change: {diff:+.2f} ({pct:+.2f}%)\n"
+
+        return (
+            f"📊 **{name} ({ticker})**\n"
+            f"💰 Price: {current_price} {currency}\n"
+            f"📋 Prev Close: {prev_close} {currency}\n"
+            f"{change}"
+            f"🏛️ Exchange: {exchange}"
+        )
+    except Exception as e:
+        return f"Error fetching stock price for {ticker}: {e}"
+
+
+@tool
+async def search_reddit(query: str, subreddit: str = "", limit: int = 5) -> str:
+    """
+    Searches Reddit for posts matching a query.
+
+    Args:
+        query: Search query
+        subreddit: Optional subreddit name (e.g., 'technology', 'python'). Leave empty to search all.
+        limit: Number of results (1-10)
+    """
+    try:
+        limit = max(1, min(10, limit))
+        headers = {"User-Agent": "SentinelAI/1.0"}
+        base_url = (
+            f"https://www.reddit.com/r/{subreddit}/search.json"
+            if subreddit
+            else "https://www.reddit.com/search.json"
+        )
+        params = {"q": query, "sort": "relevance", "limit": limit, "restrict_sr": bool(subreddit)}
+
+        async with httpx.AsyncClient(headers=headers, timeout=10, follow_redirects=True) as client:
+            response = await client.get(base_url, params=params)
+            response.raise_for_status()
+            posts = response.json().get("data", {}).get("children", [])
+
+        if not posts:
+            return f"No Reddit posts found for: {query}"
+
+        sub_label = f"r/{subreddit}" if subreddit else "Reddit"
+        result = f"🔴 **Reddit Search: '{query}' on {sub_label}**\n\n"
+        for i, post_data in enumerate(posts, 1):
+            p = post_data.get("data", {})
+            title = p.get("title", "No title")
+            sub = p.get("subreddit_name_prefixed", "")
+            score = p.get("score", 0)
+            num_comments = p.get("num_comments", 0)
+            permalink = "https://reddit.com" + p.get("permalink", "")
+            result += (
+                f"{i}. **{title}**\n"
+                f"   {sub} · ⬆️ {score} · 💬 {num_comments} comments\n"
+                f"   🔗 {permalink}\n\n"
+            )
+        return result.strip()
+    except Exception as e:
+        return f"Error searching Reddit: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Tool list
+# ---------------------------------------------------------------------------
+
 browser_tools = [
     tavily_web_search,
     scrape_webpage,
@@ -608,5 +688,8 @@ browser_tools = [
     get_currency_exchange,
     get_definition,
     check_website_status,
-    shorten_url
+    shorten_url,
+    search_wikipedia,
+    get_stock_price,
+    search_reddit,
 ]

@@ -56,30 +56,29 @@ The application requires environment variables in two `.env` files:
 
 ### Unified Launcher Pattern (launcher.py)
 
-The launcher orchestrates both components WITHOUT modifying their source code:
+The launcher orchestrates both components with event-based communication:
 
 1. **Main Thread**: Runs PyQt5 frontend (Qt requirement)
-2. **Child Thread**: Runs backend voice assistant (daemon mode)
-3. **Communication**: Thread-safe queues via `integration/communication.py`
-4. **Enhancement**: Runtime monkey-patching via `integration/backend_runner.py` and `integration/frontend_enhancer.py`
+2. **Child Thread**: Runs backend voice assistant via `BackendRunner`
+3. **Communication**: `EventBus` singleton with thread-safe queues + `QtEventBridge` for instant GUI delivery
+4. **Shutdown**: Cooperative via `threading.Event` — backend exits within ~1s
 
-**Key Principle**: Backend and Frontend source code remain UNCHANGED. All integration happens in the `integration/` layer.
+### Event Bus (integration/event_bus.py)
 
-### Communication Bus (integration/communication.py)
+Thread-safe singleton managing bidirectional event communication:
 
-Thread-safe singleton managing bidirectional message queues:
-
-**Message Types**:
-- `STATUS_UPDATE` - Backend status changes (STARTING, READY, LISTENING, PROCESSING, ERROR, STOPPED)
-- `WAKE_WORD_DETECTED` - Wake word "Sentinel" detected
-- `COMMAND_RECEIVED` - Voice command captured
-- `RESPONSE_GENERATED` - AI agent response ready
-- `ERROR` - Error occurred
-- `SHUTDOWN_REQUEST` - Graceful shutdown signal
+**Event Types** (`EventType` enum):
+- Backend lifecycle: `BACKEND_STARTING`, `BACKEND_READY`, `BACKEND_STOPPED`, `BACKEND_ERROR`
+- Voice workflow: `LISTENING_FOR_WAKE_WORD`, `WAKE_WORD_DETECTED`, `LISTENING_FOR_COMMAND`, `COMMAND_RECEIVED`, `PROCESSING_COMMAND`, `RESPONSE_GENERATED`
+- TTS: `TTS_SPEAKING`, `TTS_FINISHED`
+- Conversation: `FOLLOW_UP_DETECTED`, `CONVERSATION_ENDED`
+- Logging: `LOG_MESSAGE`
+- Frontend → Backend: `SHUTDOWN_REQUEST`
 
 **Queues**:
-- `frontend_queue`: Backend → Frontend messages
-- `backend_queue`: Frontend → Backend messages
+- `frontend_queue`: Backend → Frontend events
+- `backend_queue`: Frontend → Backend events
+- `QtEventBridge`: pyqtSignal for zero-latency cross-thread GUI delivery
 
 ### Backend Architecture (Sentinel-AI-Backend/)
 
@@ -93,7 +92,7 @@ Thread-safe singleton managing bidirectional message queues:
 
 **Multi-Agent System** (`src/graph/graph_builder.py`):
 - **LLM**: Azure OpenAI GPT (configured via environment variables)
-- **Supervisor Agent**: Routes tasks to specialized agents (Browser, Music, Meeting, or FINISH)
+- **Supervisor Agent**: Routes tasks to specialized agents (Browser, Music, Meeting, System, Productivity, Notes, Email, or FINISH)
 - **Browser Agent**: Uses `browser_tools` for web search/scraping (Tavily search, weather, news, translation)
 - **Music Agent**: Uses `music_tools` + `playwright_music_tools` for Spotify/YouTube (auto-play, lyrics, genres)
 - **Meeting Agent**: Uses `meeting_tools` for Google Meet and Calendar (create, schedule, list, join, cancel meetings)
@@ -104,12 +103,19 @@ Thread-safe singleton managing bidirectional message queues:
 - `src/utils/speech_recognizer.py` - Google Speech Recognition wrapper
 - `src/utils/text_to_speech.py` - ElevenLabs TTS integration
 - `src/utils/langgraph_router.py` - Routes commands to LangGraph
-- `src/graph/graph_builder.py` - Multi-agent graph definition (3 agents)
+- `src/utils/agent_memory.py` - Short-term memory service for agent context
+- `src/graph/graph_builder.py` - Multi-agent graph (auto-constructed from registry)
+- `src/graph/agent_registry.py` - Declarative agent definitions (add new agents here)
 - `src/graph/agent_state.py` - Shared state structure for agents
+- `src/utils/container.py` - Dependency injection container (ServiceContainer)
+- `src/utils/log_config.py` - Centralized logging configuration
+- `src/utils/llm_config.py` - Multi-provider LLM config with per-agent temperature
 - `src/tools/browser_tools.py` - Enhanced web tools (14 tools: search, weather, news, translation, etc.)
 - `src/tools/music_tools.py` - Enhanced Spotify/YouTube tools (25 tools: lyrics, genres, moods)
 - `src/tools/playwright_music_tools.py` - Playwright-based auto-play music tools (6 tools)
-- `src/tools/meeting_tools.py` - Google Meet and Calendar integration (6 tools) (NEW!)
+- `src/tools/meeting_tools.py` - Google Meet and Calendar integration (6 tools)
+- `src/tools/system_tools.py` - System control tools (15 tools: volume, brightness, apps)
+- `src/tools/productivity_tools.py` - Productivity tools (6 tools: timers, alarms)
 
 ### Frontend Architecture (Sentinel-AI-Frontend/)
 
@@ -128,76 +134,60 @@ Thread-safe singleton managing bidirectional message queues:
 - `services/service_manager.py` - Service lifecycle management
 - `ui/views/dashboard.py` - Main dashboard view
 
-**Backend Status Widget** (injected by `integration/frontend_enhancer.py`):
-- Color-coded status indicator
-- Activity log showing backend events
-- Timer-based polling (100ms) of communication bus
+**Backend Status Badge** (built into dashboard):
+- Color-coded status indicator connected via Qt signal/slot
+- Zero-latency event delivery via `QtEventBridge` (pyqtSignal)
 - Displays wake word detections, commands, responses, errors
 
 ### Integration Layer (integration/)
 
-**Purpose**: Connect backend and frontend without modifying their source code.
+**Purpose**: Connect backend and frontend via event-based communication.
 
-**backend_runner.py**:
-- Runs backend in daemon thread
-- Monkey-patches backend modules at runtime to inject `comm_bus`
-- Patches: `wake_word_listener.py`, `speech_recognizer.py`, `langgraph_router.py`
-- Sends status updates to frontend queue
+**event_bus.py**:
+- Singleton `EventBus` class with thread-safe queues
+- `Event` dataclass with type, status, data, error, timestamp
+- `QtEventBridge(QObject)` with `pyqtSignal` for instant GUI delivery
+- `EventType` enum for all backend/frontend events
+- `BackendStatus` enum for UI display
 
-**frontend_enhancer.py**:
-- Patches `DashboardPage.__init__()` to add `BackendStatusWidget`
-- Injects status widget into dashboard layout
-- No source file modification
-
-**status_widget.py**:
-- Custom PyQt5 widget showing backend status
-- Polls `comm_bus.get_frontend_message()` every 100ms
-- Updates UI based on message type and status
-
-**communication.py**:
-- Singleton `CommunicationBus` class
-- Thread-safe `Queue` objects for message passing
-- `Message` dataclass with type, status, data, error, timestamp
+**backend_runner_v2.py**:
+- Runs backend in daemon thread with `threading.Event` for graceful shutdown
+- Creates `ServiceContainer` and wires `event_bus` + `shutdown_event`
+- Passes container to `run_sentinel_agent()` for dependency injection
+- `LogStreamHandler` streams Python logging to frontend via EventBus
+- `StdoutCapture` catches third-party print() as safety net
 
 ## Development Patterns
 
-### Monkey Patching Pattern
+### Adding New Backend Agents
 
-When adding integration features, ALWAYS use runtime patching in `integration/` rather than modifying source:
+Adding a new agent requires only two steps:
 
-```python
-# integration/backend_runner.py example
-from src.utils.wake_word_listener import WakeWordListener
-
-# Save original method
-original_wait = WakeWordListener.wait_for_wake_word
-
-# Define patched version
-def patched_wait(self):
-    self.comm_bus.send_to_frontend(Message(MessageType.STATUS_UPDATE, status=BackendStatus.LISTENING))
-    result = original_wait(self)
-    if result:
-        self.comm_bus.send_to_frontend(Message(MessageType.WAKE_WORD_DETECTED))
-    return result
-
-# Apply patch
-WakeWordListener.comm_bus = comm_bus
-WakeWordListener.wait_for_wake_word = patched_wait
-```
-
-### Adding New Backend Tools
-
-1. Create tool in `Sentinel-AI-Backend/src/tools/` (e.g., `email_tools.py`)
-2. Define tools using `@tool` decorator from `langchain.tools`
-3. Add tools to agent in `src/graph/graph_builder.py`:
+1. Create a tools file in `Sentinel-AI-Backend/src/tools/` with a tools list:
    ```python
-   from src.tools.email_tools import email_tools
-   email_agent_tools = email_tools
-   email_agent_node = create_agent_node(llm, email_agent_tools, "Email")
-   workflow.add_node("Email", email_agent_node)
+   # src/tools/my_tools.py
+   from langchain.tools import tool
+
+   @tool
+   def my_tool(query: str) -> str:
+       """Tool description."""
+       return "result"
+
+   my_tools = [my_tool]
    ```
-4. Update supervisor prompt to include new agent
-5. Update router function with new conditional edge
+
+2. Add one entry to `AGENT_REGISTRY` in `src/graph/agent_registry.py`:
+   ```python
+   AgentDefinition(
+       name="MyAgent",
+       description="For tasks involving...",
+       tools_module="src.tools.my_tools",
+       tools_attr="my_tools",
+       priority=80,
+   ),
+   ```
+
+The graph builder auto-constructs supervisor prompt, nodes, edges, and router from the registry. No changes to `graph_builder.py` needed.
 
 ### Adding New Frontend Services
 
@@ -208,12 +198,12 @@ WakeWordListener.wait_for_wake_word = patched_wait
 
 ### Shutdown Handling
 
-The launcher ensures graceful shutdown:
+The launcher ensures graceful shutdown via `threading.Event`:
 1. User closes window → `QMainWindow.closeEvent()`
-2. Enhanced close event calls `launcher.shutdown()`
-3. Backend runner sets `running = False`
-4. Backend thread exits cleanly (cleans up Porcupine, speech recognizer)
-5. Communication bus queues cleared
+2. Close event calls `launcher.shutdown()`
+3. Backend runner calls `shutdown_event.set()`
+4. Orchestrator's `_should_run()` returns False, loop exits within ~1s
+5. `wake_listener.stop()` and `memory.end_session()` cleanup in `finally:`
 6. PyQt event loop exits
 
 ## Dependencies
@@ -299,6 +289,115 @@ LangSmith provides powerful observability and debugging for the LangGraph multi-
 
 Set `LANGCHAIN_TRACING_V2=false` in `.env` or comment out the variable to disable tracing.
 
+## Agent Memory System
+
+The backend includes a short-term memory system that allows agents to know what has been done in recent interactions.
+
+### How It Works
+
+**Memory Storage** (`src/utils/agent_memory.py`):
+- Uses MongoDB (same instance as frontend) for persistent storage
+- Falls back to in-memory storage if MongoDB unavailable
+- Auto-expires old memories via TTL index (default: 24 hours)
+
+**Memory Types**:
+- `command` - User voice commands
+- `agent_action` - Agent invocations with tools used
+- `tool_call` - Individual tool calls with inputs/outputs
+- `result` - Final responses
+- `error` - Errors that occurred
+
+**Session Tracking**:
+- Each wake-word conversation gets a unique `session_id`
+- Commands and actions within a session are linked
+- Sessions end when conversation completes or times out
+
+### Context Injection
+
+Before each agent executes, recent memory is injected into its prompt:
+
+```
+[Recent Activity]
+• User asked: "play some jazz"
+• Music agent used search_and_play_song: Playing jazz playlist on Spotify
+• User asked: "something more upbeat"
+
+[Current Request]
+play some funk music
+```
+
+This allows agents to understand context from previous interactions.
+
+### MongoDB Collection Schema
+
+```javascript
+// Collection: agent_memory
+{
+  "_id": ObjectId,
+  "user_id": "user_object_id",
+  "session_id": "uuid-string",
+  "timestamp": ISODate,
+  "type": "command" | "agent_action" | "tool_call" | "result" | "error",
+  "agent": "Browser" | "Music" | "Meeting" | "System" | "Productivity",
+  "content": {
+    // For commands:
+    "command": "play some jazz",
+
+    // For agent_action:
+    "input": "user request",
+    "output": "agent response",
+    "tools_used": ["tool1", "tool2"],
+    "success": true,
+    "duration_ms": 1500
+  },
+  "expires_at": ISODate  // TTL - auto-deletes after 24h
+}
+```
+
+### Configuration
+
+Add to `Sentinel-AI-Backend/.env`:
+```bash
+# Uses same MongoDB as frontend
+MONGODB_CONNECTION_STRING=mongodb+srv://...
+MONGODB_DATABASE=sentinel_ai_db
+```
+
+If not configured, memory falls back to in-memory (non-persistent, clears on restart).
+
+### Using Memory in Code
+
+```python
+from src.utils.agent_memory import get_agent_memory, MemoryType
+
+memory = get_agent_memory()
+
+# Start a session
+session_id = memory.start_session()
+
+# Store a command
+memory.store_command("play some jazz")
+
+# Store agent action
+memory.store_agent_action(
+    agent="Music",
+    input_text="play some jazz",
+    output_text="Playing jazz playlist",
+    tools_used=["search_and_play_song"],
+    success=True,
+    duration_ms=1500
+)
+
+# Get context for agent
+context = memory.get_context_for_agent(agent="Music", minutes=15)
+
+# Get recent memories
+recent = memory.get_recent_memories(minutes=30, limit=10)
+
+# End session
+memory.end_session()
+```
+
 ## Common Issues
 
 ### TAVILY_API_KEY Not Found
@@ -315,6 +414,18 @@ Verify `MONGODB_CONNECTION_STRING` in frontend `.env`. Check network connectivit
 
 ### Google Meet OAuth Error
 Ensure `credentials.json` exists in `Sentinel-AI-Frontend/`. Token stored in `token.json` after first auth.
+
+## Technical Roadmap
+
+See **`ENHANCEMENTS.md`** at project root for the comprehensive technical audit and enhancement roadmap. It catalogs:
+- 8 critical bugs with file paths and line numbers
+- 7 security vulnerabilities with suggested fixes
+- 12 performance optimizations
+- 6 proposed new agents and 20+ new tools
+- 8 architecture improvements
+- A prioritized 3-phase implementation roadmap (Stability > Performance > Features)
+
+When implementing fixes or new features, consult `ENHANCEMENTS.md` for context on known issues and the recommended approach.
 
 ## Code Style Notes
 

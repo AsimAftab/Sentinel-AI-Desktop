@@ -8,4 +8,4 @@ from .login_page import LoginPage
 from .signup_page import SignupPage
 from .dashboard import DashboardPage
 
-__all__ = ['LoginPage', 'SignupPage', 'DashboardPage']
+__all__ = ["LoginPage", "SignupPage", "DashboardPage"]

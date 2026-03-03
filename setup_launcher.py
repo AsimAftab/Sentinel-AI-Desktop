@@ -21,9 +21,9 @@ def run_command(command, cwd=None, show_output=True):
     try:
         print(f"\nRunning: {command}")
         if show_output:
-            print("\n" + "="*60)
+            print("\n" + "=" * 60)
             print("LIVE OUTPUT (this may take 15-30 minutes):")
-            print("="*60)
+            print("=" * 60)
             # Stream output in real-time so user sees progress
             process = subprocess.Popen(
                 command,
@@ -32,11 +32,11 @@ def run_command(command, cwd=None, show_output=True):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=1,
             )
 
             for line in process.stdout:
-                print(line, end='')
+                print(line, end="")
 
             process.wait()
 
@@ -47,18 +47,13 @@ def run_command(command, cwd=None, show_output=True):
             return True
         else:
             result = subprocess.run(
-                command,
-                shell=True,
-                cwd=cwd,
-                check=True,
-                capture_output=True,
-                text=True
+                command, shell=True, cwd=cwd, check=True, capture_output=True, text=True
             )
             print(result.stdout)
             return True
     except subprocess.CalledProcessError as e:
         print(f"Error: {e}")
-        if hasattr(e, 'stderr'):
+        if hasattr(e, "stderr"):
             print(e.stderr)
         return False
     except Exception as e:
@@ -70,9 +65,9 @@ def install_dependencies():
     """Install dependencies for both frontend and backend."""
     project_root = Path(__file__).parent
 
-    print("="*60)
+    print("=" * 60)
     print("Sentinel AI - Dependency Installation")
-    print("="*60)
+    print("=" * 60)
     print("\n⚠ WARNING: This will install ~305 packages (~4GB)")
     print("⏱ Expected time: 20-60 minutes")
     print("\nPress Ctrl+C to cancel, or press Enter to continue...")
@@ -95,11 +90,11 @@ def install_dependencies():
             backend_start = time.time()
             success = run_command(
                 f'"{sys.executable}" -m pip install -r "{backend_requirements}" --progress-bar on',
-                show_output=True
+                show_output=True,
             )
             backend_time = time.time() - backend_start
             if success:
-                print(f"✓ Backend dependencies installed in {backend_time/60:.1f} minutes")
+                print(f"✓ Backend dependencies installed in {backend_time / 60:.1f} minutes")
             else:
                 print("✗ Failed to install backend dependencies")
                 return False
@@ -120,11 +115,11 @@ def install_dependencies():
             frontend_start = time.time()
             success = run_command(
                 f'"{sys.executable}" -m pip install -r "{frontend_requirements}" --progress-bar on',
-                show_output=True
+                show_output=True,
             )
             frontend_time = time.time() - frontend_start
             if success:
-                print(f"✓ Frontend dependencies installed in {frontend_time/60:.1f} minutes")
+                print(f"✓ Frontend dependencies installed in {frontend_time / 60:.1f} minutes")
             else:
                 print("✗ Failed to install frontend dependencies")
                 return False
@@ -135,14 +130,14 @@ def install_dependencies():
         return False
 
     total_time = time.time() - start_time
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Installation Complete!")
-    print("="*60)
-    print(f"\n⏱ Total time: {total_time/60:.1f} minutes")
+    print("=" * 60)
+    print(f"\n⏱ Total time: {total_time / 60:.1f} minutes")
     print("\nNext steps:")
     print("1. Configure .env files in both Sentinel-AI-Backend and Sentinel-AI-Frontend")
     print("2. Run: python launcher.py")
-    print("="*60)
+    print("=" * 60)
 
     return True
 
@@ -151,9 +146,9 @@ def check_environment():
     """Check if the environment is properly configured."""
     project_root = Path(__file__).parent
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Environment Check")
-    print("="*60)
+    print("=" * 60)
 
     issues = []
 
@@ -191,9 +186,9 @@ def check_environment():
 
 def check_if_installed():
     """Check if dependencies are already installed."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Checking if dependencies are already installed...")
-    print("="*60)
+    print("=" * 60)
 
     backend_ok = False
     frontend_ok = False
@@ -203,6 +198,7 @@ def check_if_installed():
         sys.path.insert(0, str(Path(__file__).parent / "Sentinel-AI-Backend"))
         import langchain
         import langgraph
+
         print("✓ Backend dependencies appear to be installed")
         backend_ok = True
     except ImportError as e:
@@ -213,15 +209,16 @@ def check_if_installed():
         sys.path.insert(0, str(Path(__file__).parent / "Sentinel-AI-Frontend"))
         from PyQt5.QtWidgets import QApplication
         import pymongo
+
         print("✓ Frontend dependencies appear to be installed")
         frontend_ok = True
     except ImportError as e:
         print(f"✗ Frontend dependencies missing: {e.name}")
 
     if backend_ok and frontend_ok:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("✓ All dependencies already installed!")
-        print("="*60)
+        print("=" * 60)
         print("\nYou can skip installation and run directly:")
         print("  python launcher.py")
         print("\nOr reinstall anyway if having issues.")
@@ -232,9 +229,9 @@ def check_if_installed():
 
 def main():
     """Main setup function."""
-    print("="*60)
+    print("=" * 60)
     print("Sentinel AI Launcher Setup")
-    print("="*60)
+    print("=" * 60)
     print()
 
     # Check directory structure

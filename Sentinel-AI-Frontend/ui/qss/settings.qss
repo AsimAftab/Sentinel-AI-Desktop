@@ -1,0 +1,411 @@
+/* Settings Page Stylesheet */
+
+/* Page Container */
+#settingsPage {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #0f0f23, stop:1 #1a1a2e);
+}
+
+/* Page Title */
+#pageTitle {
+    color: #ffffff;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+/* Back Button */
+#backButton {
+    background: transparent;
+    border: 2px solid #4a9eff;
+    border-radius: 8px;
+    color: #4a9eff;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#backButton:hover {
+    background: #4a9eff;
+    color: #ffffff;
+}
+
+#backButton:pressed {
+    background: #3a8eef;
+}
+
+/* Settings Group */
+#settingsGroup {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 12px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: bold;
+    margin-top: 10px;
+    padding-top: 15px;
+}
+
+#settingsGroup::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top center;
+    padding: 0 10px;
+    color: #4a9eff;
+}
+
+/* Provider Frame */
+#providerFrame {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(74, 158, 255, 0.2);
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+/* Settings Input Fields */
+#settingsInput {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 8px 12px;
+    min-height: 35px;
+}
+
+#settingsInput:focus {
+    border: 1px solid #4a9eff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+#settingsInput::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Settings Combo Box */
+#settingsCombo {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 8px 12px;
+    min-height: 35px;
+}
+
+#settingsCombo:hover {
+    border: 1px solid #4a9eff;
+}
+
+#settingsCombo::drop-down {
+    background: rgba(15, 15, 35, 0.95);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 6px;
+}
+
+#settingsCombo QAbstractItemView {
+    background: rgba(15, 15, 35, 0.95);
+    border: none;
+    color: #ffffff;
+    selection-background-color: #4a9eff;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+#settingsCombo::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #4a9eff;
+    width: 0;
+    height: 0;
+}
+
+/* Settings Spin Box */
+#settingsSpin {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 8px 12px;
+    min-height: 35px;
+}
+
+#settingsSpin:focus {
+    border: 1px solid #4a9eff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+#settingsSpin::up-button, #settingsSpin::down-button {
+    background: rgba(74, 158, 255, 0.2);
+    border: none;
+    width: 20px;
+}
+
+#settingsSpin::up-button:hover, #settingsSpin::down-button:hover {
+    background: rgba(74, 158, 255, 0.4);
+}
+
+#settingsSpin::up-arrow, #settingsSpin::down-arrow {
+    width: 8px;
+    height: 8px;
+    background: #4a9eff;
+}
+
+/* Settings Checkbox */
+#settingsCheckbox {
+    color: #ffffff;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+#settingsCheckbox::indicator {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(74, 158, 255, 0.5);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+#settingsCheckbox::indicator:hover {
+    border: 2px solid #4a9eff;
+    background: rgba(74, 158, 255, 0.1);
+}
+
+#settingsCheckbox::indicator:checked {
+    background: #4a9eff;
+    border: 2px solid #4a9eff;
+}
+
+#settingsCheckbox::indicator:checked:hover {
+    background: #3a8eef;
+}
+
+/* Save Button */
+#saveButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4a9eff, stop:1 #3a8eef);
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+#saveButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #5aaeff, stop:1 #4a9eff);
+}
+
+#saveButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #3a8eef, stop:1 #2a7eef);
+}
+
+#saveButton:disabled {
+    background: rgba(74, 158, 255, 0.3);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Scroll Area */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+QScrollBar:vertical {
+    background: rgba(255, 255, 255, 0.05);
+    width: 10px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(74, 158, 255, 0.3);
+    border-radius: 5px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(74, 158, 255, 0.5);
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* Form Layout Labels */
+QLabel {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+}
+
+/* Group Box Title */
+QGroupBox::title {
+    color: #4a9eff;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+/* ===== MODERN SETTINGS PAGE STYLES ===== */
+
+/* Sidebar */
+#settingsSidebar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #1e293b, stop:1 #0f172a);
+    border: none;
+}
+
+#sidebarAppTitle {
+    color: #ffffff;
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+#sidebarGreeting {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+#settingsProfileCard {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+#settingsAvatar {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #3b82f6, stop:1 #2563eb);
+    border-radius: 20px;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+#settingsProfileName {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#settingsProfileEmail {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+}
+
+/* Navigation Buttons */
+#settingsNavBtn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    text-align: left;
+    padding-left: 12px;
+}
+
+#settingsNavBtn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+#settingsNavBtnActive {
+    color: #ffffff;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+}
+
+/* Content Area */
+#settingsContentArea {
+    background: transparent;
+}
+
+#settingsScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* Settings Page Title */
+#settingsPageTitle {
+    color: #ffffff;
+    font-size: 28px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+#settingsPageSubtitle {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+/* Settings Card Group */
+#settingsCardGroup {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(74, 158, 255, 0.2);
+    border-radius: 16px;
+    color: #ffffff;
+    font-size: 14px;
+    margin-top: 16px;
+}
+
+#settingsCardGroup::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 12px;
+    color: #4a9eff;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* Settings Section */
+#settingsSection {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+#settingsSectionLabel {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* Provider Cards */
+#settingsProviderCard {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(74, 158, 255, 0.15);
+    border-radius: 12px;
+}
+
+#settingsCardTitle {
+    color: #3b82f6;
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+/* Save Button */
+#settingsSaveButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4a9eff, stop:1 #3a8eef);
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    padding: 12px 32px;
+}
+
+#settingsSaveButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #5aaeff, stop:1 #4a9eff);
+}
+
+#settingsSaveButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #3a8eef, stop:1 #2a7eef);
+}

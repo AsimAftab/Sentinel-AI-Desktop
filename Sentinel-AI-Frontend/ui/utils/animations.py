@@ -87,15 +87,17 @@ class UIAnimations:
         expand_animation = QPropertyAnimation(widget, b"size")
         expand_animation.setDuration(duration // 2)
         expand_animation.setStartValue(original_size)
-        expand_animation.setEndValue(QSize(int(original_size.width() * 1.05),
-                                           int(original_size.height() * 1.05)))
+        expand_animation.setEndValue(
+            QSize(int(original_size.width() * 1.05), int(original_size.height() * 1.05))
+        )
         expand_animation.setEasingCurve(QEasingCurve.OutQuad)
 
         # Then contract back
         contract_animation = QPropertyAnimation(widget, b"size")
         contract_animation.setDuration(duration // 2)
-        contract_animation.setStartValue(QSize(int(original_size.width() * 1.05),
-                                               int(original_size.height() * 1.05)))
+        contract_animation.setStartValue(
+            QSize(int(original_size.width() * 1.05), int(original_size.height() * 1.05))
+        )
         contract_animation.setEndValue(original_size)
         contract_animation.setEasingCurve(QEasingCurve.InQuad)
 
@@ -139,10 +141,10 @@ class UIAnimations:
         animation.setKeyValueAt(0.2, QPoint(original_pos.x() - intensity, original_pos.y()))
         animation.setKeyValueAt(0.3, QPoint(original_pos.x() + intensity, original_pos.y()))
         animation.setKeyValueAt(0.4, QPoint(original_pos.x() - intensity, original_pos.y()))
-        animation.setKeyValueAt(0.5, QPoint(original_pos.x() + intensity//2, original_pos.y()))
-        animation.setKeyValueAt(0.6, QPoint(original_pos.x() - intensity//2, original_pos.y()))
-        animation.setKeyValueAt(0.7, QPoint(original_pos.x() + intensity//3, original_pos.y()))
-        animation.setKeyValueAt(0.8, QPoint(original_pos.x() - intensity//3, original_pos.y()))
+        animation.setKeyValueAt(0.5, QPoint(original_pos.x() + intensity // 2, original_pos.y()))
+        animation.setKeyValueAt(0.6, QPoint(original_pos.x() - intensity // 2, original_pos.y()))
+        animation.setKeyValueAt(0.7, QPoint(original_pos.x() + intensity // 3, original_pos.y()))
+        animation.setKeyValueAt(0.8, QPoint(original_pos.x() - intensity // 3, original_pos.y()))
         animation.setKeyValueAt(1, original_pos)
 
         animation.start()
@@ -159,24 +161,28 @@ class HoverEffect:
         original_size = button.size()
 
         def on_enter(event):
-            if hasattr(button, '_hover_animation'):
+            if hasattr(button, "_hover_animation"):
                 button._hover_animation.stop()
 
             animation = QPropertyAnimation(button, b"size")
             animation.setDuration(150)
             animation.setStartValue(button.size())
-            animation.setEndValue(QSize(int(original_size.width() * scale_factor),
-                                       int(original_size.height() * scale_factor)))
+            animation.setEndValue(
+                QSize(
+                    int(original_size.width() * scale_factor),
+                    int(original_size.height() * scale_factor),
+                )
+            )
             animation.setEasingCurve(QEasingCurve.OutCubic)
             animation.start()
             button._hover_animation = animation
 
             # Call original event handler
-            if hasattr(button, '_original_enter_event'):
+            if hasattr(button, "_original_enter_event"):
                 button._original_enter_event(event)
 
         def on_leave(event):
-            if hasattr(button, '_hover_animation'):
+            if hasattr(button, "_hover_animation"):
                 button._hover_animation.stop()
 
             animation = QPropertyAnimation(button, b"size")
@@ -188,7 +194,7 @@ class HoverEffect:
             button._hover_animation = animation
 
             # Call original event handler
-            if hasattr(button, '_original_leave_event'):
+            if hasattr(button, "_original_leave_event"):
                 button._original_leave_event(event)
 
         # Store original event handlers

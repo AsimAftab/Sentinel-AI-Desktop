@@ -1,12 +1,25 @@
+import logging
+import os
+
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
-    QHBoxLayout, QFrame, QMessageBox, QCheckBox, QAction, QGraphicsDropShadowEffect
+    QWidget,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame,
+    QMessageBox,
+    QCheckBox,
+    QAction,
+    QGraphicsDropShadowEffect,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize, QTimer
 from PyQt5.QtGui import QIcon, QPixmap, QColor, QPainter
 from PyQt5.QtSvg import QSvgWidget
 import qtawesome as qta
-import os
+
+logger = logging.getLogger(__name__)
 
 # Import your database and session managers
 from auth.keyring_auth import KeyringAuthFixed
@@ -19,6 +32,7 @@ from ui.widgets.loading_spinner import LoadingOverlay
 # Helper class to make labels (like "Sign up") clickable
 class ClickableLabel(QLabel):
     clicked = pyqtSignal()
+
     def mousePressEvent(self, event):
         self.clicked.emit()
         super().mousePressEvent(event)
@@ -29,7 +43,7 @@ class CheckBoxWithIcon(QCheckBox):
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
         try:
-            self.check_icon = qta.icon('fa5s.check', color='white', scale_factor=0.65)
+            self.check_icon = qta.icon("fa5s.check", color="white", scale_factor=0.65)
         except:
             self.check_icon = None
 
@@ -82,10 +96,12 @@ class LoginPage(QWidget):
         icon_path = os.path.join(os.path.dirname(__file__), "..", "assests", "icon.png")
         if os.path.exists(icon_path):
             icon_pixmap = QPixmap(icon_path)
-            scaled_pixmap = icon_pixmap.scaled(250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = icon_pixmap.scaled(
+                250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
             icon_label.setPixmap(scaled_pixmap)
         else:
-            print(f"Icon not found at: {icon_path}")
+            logger.warning("Icon not found at: %s", icon_path)
 
         # Card Header
         self.card_title = QLabel("Welcome Back")
@@ -110,11 +126,11 @@ class LoginPage(QWidget):
 
         # Add user icon using QtAwesome
         try:
-            user_icon = qta.icon('fa5s.user', color='#64748b', scale_factor=0.9)
+            user_icon = qta.icon("fa5s.user", color="#64748b", scale_factor=0.9)
             user_action = QAction(user_icon, "", self.username_input)
             self.username_input.addAction(user_action, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"User icon error: {e}")
+            logger.debug("User icon error: %s", e)
 
         # Add validation hint label
         self.username_hint = QLabel("")
@@ -135,21 +151,21 @@ class LoginPage(QWidget):
 
         # Add lock icon using QtAwesome
         try:
-            lock_icon = qta.icon('fa5s.lock', color='#64748b', scale_factor=0.9)
+            lock_icon = qta.icon("fa5s.lock", color="#64748b", scale_factor=0.9)
             lock_action = QAction(lock_icon, "", self.password_input)
             self.password_input.addAction(lock_action, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"Lock icon error: {e}")
+            logger.debug("Lock icon error: %s", e)
 
         # Add eye icon for password visibility toggle
         try:
-            self.eye_icon = qta.icon('fa5s.eye', color='#64748b', scale_factor=0.9)
-            self.eye_off_icon = qta.icon('fa5s.eye-slash', color='#64748b', scale_factor=0.9)
+            self.eye_icon = qta.icon("fa5s.eye", color="#64748b", scale_factor=0.9)
+            self.eye_off_icon = qta.icon("fa5s.eye-slash", color="#64748b", scale_factor=0.9)
             self.eye_action = QAction(self.eye_icon, "", self.password_input)
             self.eye_action.triggered.connect(self.toggle_password_visibility)
             self.password_input.addAction(self.eye_action, QLineEdit.TrailingPosition)
         except Exception as e:
-            print(f"Eye icon error: {e}")
+            logger.debug("Eye icon error: %s", e)
 
         # Add validation hint label
         self.password_hint = QLabel("")
@@ -286,7 +302,7 @@ class LoginPage(QWidget):
                 self.password_visible = True
                 self.eye_action.setIcon(self.eye_off_icon)
         except Exception as e:
-            print(f"Toggle visibility error: {e}")
+            logger.debug("Toggle visibility error: %s", e)
 
     def show_validation_hint(self, field, message, is_error=True):
         """Show validation hint below input field"""
@@ -297,8 +313,7 @@ class LoginPage(QWidget):
 
         hint_label.setText(message)
         hint_label.setStyleSheet(
-            f"color: {'#ef4444' if is_error else '#22c55e'}; "
-            f"font-size: 12px; margin-top: 4px;"
+            f"color: {'#ef4444' if is_error else '#22c55e'}; font-size: 12px; margin-top: 4px;"
         )
         hint_label.show()
 
@@ -367,23 +382,23 @@ class LoginPage(QWidget):
                 user_service = UserService()
                 db_user = user_service.get_user_by_username(username)
 
-                if db_user and '_id' in db_user:
-                    user_id = str(db_user['_id'])
-                    print(f"✅ Fetched user_id from MongoDB: {user_id}")
+                if db_user and "_id" in db_user:
+                    user_id = str(db_user["_id"])
+                    logger.info("Fetched user_id from MongoDB: %s", user_id)
                 else:
                     # Fallback if DB user not found (shouldn't happen)
                     user_id = username  # Use username as fallback
-                    print(f"⚠️ User not found in MongoDB, using username as fallback")
+                    logger.warning("User not found in MongoDB, using username as fallback")
 
                 # Write user context for backend
                 context_writer = UserContextWriter()
                 context_writer.write_user_context(
                     user_id=user_id,
                     username=username,
-                    additional_data={'fullname': user_data.get('fullname')}
+                    additional_data={"fullname": user_data.get("fullname")},
                 )
             except Exception as e:
-                print(f"⚠️ Failed to write user context: {e}")
+                logger.warning("Failed to write user context: %s", e)
 
             # Hide loading overlay and show success
             self.loading_overlay.hide_overlay()
@@ -412,7 +427,7 @@ class LoginPage(QWidget):
             QMessageBox.critical(
                 self,
                 "Connection Error",
-                f"Unable to connect to the server. Please try again.\n\nError: {str(e)}"
+                f"Unable to connect to the server. Please try again.\n\nError: {str(e)}",
             )
             self._reset_inputs()
 
@@ -467,7 +482,7 @@ class LoginPage(QWidget):
     def resizeEvent(self, event):
         """Handle window resize to reposition loading overlay"""
         super().resizeEvent(event)
-        if hasattr(self, 'loading_overlay') and self.loading_overlay.isVisible():
+        if hasattr(self, "loading_overlay") and self.loading_overlay.isVisible():
             # Update overlay geometry to cover entire widget
             self.loading_overlay.setGeometry(0, 0, self.width(), self.height())
             self.loading_overlay._position_spinner()

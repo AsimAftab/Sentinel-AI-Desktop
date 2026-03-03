@@ -2,9 +2,12 @@
 # Helper to write user context for backend consumption
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class UserContextWriter:
@@ -46,12 +49,12 @@ class UserContextWriter:
             # Create directory if needed
             self.context_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.context_path, 'w') as f:
+            with open(self.context_path, "w") as f:
                 json.dump(context, f, indent=2)
 
-            print(f"✅ User context written to: {self.context_path}")
+            logger.info("User context written to: %s", self.context_path)
         except Exception as e:
-            print(f"⚠️ Failed to write user context: {e}")
+            logger.warning("Failed to write user context: %s", e)
 
     def clear_user_context(self):
         """Clear user context (called on logout)."""
@@ -65,19 +68,19 @@ class UserContextWriter:
 
         try:
             if self.context_path.exists():
-                with open(self.context_path, 'w') as f:
+                with open(self.context_path, "w") as f:
                     json.dump(context, f, indent=2)
-                print(f"✅ User context cleared: {self.context_path}")
+                logger.info("User context cleared: %s", self.context_path)
         except Exception as e:
-            print(f"⚠️ Failed to clear user context: {e}")
+            logger.warning("Failed to clear user context: %s", e)
 
     def read_user_context(self) -> dict:
         """Read current user context (for debugging)."""
         if self.context_path.exists():
             try:
-                with open(self.context_path, 'r') as f:
+                with open(self.context_path, "r") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"⚠️ Failed to read user context: {e}")
+                logger.warning("Failed to read user context: %s", e)
 
         return {"current_user_id": None, "session_active": False}
