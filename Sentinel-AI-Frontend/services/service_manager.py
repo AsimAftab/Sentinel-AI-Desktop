@@ -8,6 +8,7 @@ from .spotify_service import SpotifyService
 
 log = logging.getLogger(__name__)
 
+
 class Service:
     """Base service - implement real connect/disconnect logic per service.
 
@@ -22,6 +23,7 @@ class Service:
     def disconnect(self) -> Tuple[bool, str]:
         time.sleep(0.5)
         return True, "Disconnected (default service)"
+
 
 class ServiceManager:
     """Run service connect/disconnect logic in background threads."""

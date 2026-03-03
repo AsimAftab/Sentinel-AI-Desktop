@@ -3,6 +3,8 @@ Event-based communication system for Frontend-Backend integration.
 Replaces monkey patching with a clean, type-safe event system.
 """
 
+import logging
+import queue
 from queue import Queue
 from enum import Enum
 from typing import Optional, Any, Callable
@@ -10,9 +12,26 @@ from dataclasses import dataclass
 from datetime import datetime
 import threading
 
+logger = logging.getLogger(__name__)
+
+# Optional Qt bridge for zero-latency event delivery to the GUI thread.
+# Only available when PyQt5 is installed (i.e. when the frontend is running).
+try:
+    from PyQt5.QtCore import QObject, pyqtSignal
+
+    class QtEventBridge(QObject):
+        """Emits a Qt signal whenever an event arrives, delivering it to the main thread."""
+
+        event_received = pyqtSignal(object)  # carries an Event instance
+
+    _QT_AVAILABLE = True
+except ImportError:
+    _QT_AVAILABLE = False
+
 
 class EventType(Enum):
     """Types of events emitted by backend and frontend."""
+
     # Backend lifecycle
     BACKEND_STARTING = "backend_starting"
     BACKEND_READY = "backend_ready"
@@ -44,6 +63,7 @@ class EventType(Enum):
 
 class BackendStatus(Enum):
     """Backend operational status for UI display."""
+
     STARTING = "Starting..."
     READY = "Ready"
     LISTENING = "Listening for 'Sentinel'"
@@ -57,6 +77,7 @@ class BackendStatus(Enum):
 @dataclass
 class Event:
     """Event structure for inter-thread communication."""
+
     type: EventType
     status: Optional[BackendStatus] = None
     data: Optional[Any] = None
@@ -89,13 +110,19 @@ class EventBus:
         if self._initialized:
             return
 
-        self.frontend_queue = Queue()  # Backend -> Frontend events
-        self.backend_queue = Queue()   # Frontend -> Backend events
+        self.frontend_queue = Queue(maxsize=1000)  # Backend -> Frontend events
+        self.backend_queue = Queue(maxsize=1000)  # Frontend -> Backend events
         self._subscribers = {}  # Event type -> list of callback functions
+        self._qt_bridge = None  # Optional QtEventBridge for zero-latency GUI delivery
         self._initialized = True
 
-    def emit(self, event_type: EventType, status: Optional[BackendStatus] = None,
-             data: Optional[Any] = None, error: Optional[str] = None):
+    def emit(
+        self,
+        event_type: EventType,
+        status: Optional[BackendStatus] = None,
+        data: Optional[Any] = None,
+        error: Optional[str] = None,
+    ):
         """
         Emit an event to the event bus.
 
@@ -105,15 +132,28 @@ class EventBus:
             data: Optional event data
             error: Optional error message
         """
-        event = Event(
-            type=event_type,
-            status=status,
-            data=data,
-            error=error
-        )
+        event = Event(type=event_type, status=status, data=data, error=error)
 
-        # Send to frontend queue
-        self.frontend_queue.put(event)
+        # Send to frontend queue (drop oldest if full)
+        try:
+            self.frontend_queue.put_nowait(event)
+        except queue.Full:
+            try:
+                self.frontend_queue.get_nowait()  # drop oldest
+            except queue.Empty:
+                pass
+            try:
+                self.frontend_queue.put_nowait(event)
+            except queue.Full:
+                pass
+
+        # Deliver via Qt signal (immediate, cross-thread, zero-latency)
+        if self._qt_bridge is not None:
+            try:
+                self._qt_bridge.event_received.emit(event)
+            except RuntimeError:
+                # Bridge destroyed (app shutting down)
+                self._qt_bridge = None
 
         # Notify subscribers
         if event_type in self._subscribers:
@@ -121,7 +161,7 @@ class EventBus:
                 try:
                     callback(event)
                 except Exception as e:
-                    print(f"⚠️ Error in event subscriber: {e}")
+                    logger.warning("Error in event subscriber: %s", e)
 
     def subscribe(self, event_type: EventType, callback: Callable[[Event], None]):
         """
@@ -134,6 +174,13 @@ class EventBus:
         if event_type not in self._subscribers:
             self._subscribers[event_type] = []
         self._subscribers[event_type].append(callback)
+
+    def set_qt_bridge(self, bridge):
+        """
+        Set a QtEventBridge to receive instant event delivery via Qt signals.
+        Call from the main (GUI) thread after creating the bridge.
+        """
+        self._qt_bridge = bridge
 
     def unsubscribe(self, event_type: EventType, callback: Callable[[Event], None]):
         """
@@ -159,7 +206,7 @@ class EventBus:
         """
         try:
             return self.frontend_queue.get(block=block, timeout=timeout)
-        except:
+        except queue.Empty:
             return None
 
     def send_to_backend(self, event_type: EventType, data: Optional[Any] = None):
@@ -186,7 +233,7 @@ class EventBus:
         """
         try:
             return self.backend_queue.get(block=block, timeout=timeout)
-        except:
+        except queue.Empty:
             return None
 
     def clear(self):
@@ -194,12 +241,12 @@ class EventBus:
         while not self.frontend_queue.empty():
             try:
                 self.frontend_queue.get_nowait()
-            except:
+            except queue.Empty:
                 break
         while not self.backend_queue.empty():
             try:
                 self.backend_queue.get_nowait()
-            except:
+            except queue.Empty:
                 break
 
     def has_events(self) -> bool:

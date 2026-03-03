@@ -12,32 +12,40 @@ import os
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+
+from src.utils.log_config import configure_logging
+
+configure_logging()
 
 # Try to import MongoDB
 try:
     from pymongo import MongoClient, DESCENDING
     from pymongo.errors import PyMongoError
     from bson import ObjectId
+
     MONGODB_AVAILABLE = True
 except ImportError:
     MONGODB_AVAILABLE = False
-    print("⚠️ pymongo not installed. Agent memory will use in-memory fallback.")
+    logging.getLogger("agent_memory").warning(
+        "pymongo not installed. Agent memory will use in-memory fallback."
+    )
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
+log = logging.getLogger("agent_memory")
 
 
 class MemoryType:
     """Types of memory entries."""
-    COMMAND = "command"           # User voice command
-    AGENT_ACTION = "agent_action" # Agent was invoked
-    TOOL_CALL = "tool_call"       # Tool was called
-    RESULT = "result"             # Final result/response
-    CONTEXT = "context"           # Contextual information
-    ERROR = "error"               # Error occurred
+
+    COMMAND = "command"  # User voice command
+    AGENT_ACTION = "agent_action"  # Agent was invoked
+    TOOL_CALL = "tool_call"  # Tool was called
+    RESULT = "result"  # Final result/response
+    CONTEXT = "context"  # Contextual information
+    ERROR = "error"  # Error occurred
+    PREFERENCE = "preference"  # Permanent user preference (no TTL)
 
 
 class AgentMemory:
@@ -94,27 +102,24 @@ class AgentMemory:
 
     def _create_indexes(self):
         """Create indexes for efficient queries and TTL expiration."""
-        if not self.memory_collection:
+        if self.memory_collection is None:
             return
 
         try:
             # Index for user + session queries
-            self.memory_collection.create_index([
-                ("user_id", DESCENDING),
-                ("session_id", DESCENDING),
-                ("timestamp", DESCENDING)
-            ])
+            self.memory_collection.create_index(
+                [("user_id", DESCENDING), ("session_id", DESCENDING), ("timestamp", DESCENDING)]
+            )
 
             # Index for user + time-based queries
-            self.memory_collection.create_index([
-                ("user_id", DESCENDING),
-                ("timestamp", DESCENDING)
-            ])
+            self.memory_collection.create_index(
+                [("user_id", DESCENDING), ("timestamp", DESCENDING)]
+            )
 
             # TTL index - auto-delete documents after expires_at
             self.memory_collection.create_index(
                 "expires_at",
-                expireAfterSeconds=0  # Delete when expires_at is reached
+                expireAfterSeconds=0,  # Delete when expires_at is reached
             )
 
             log.info("✅ AgentMemory indexes created")
@@ -134,8 +139,11 @@ class AgentMemory:
         self._current_session_id = str(uuid.uuid4())
         self._current_user_id = user_id or self._get_user_id_from_context()
 
-        log.info("📝 Started new session: %s for user: %s",
-                 self._current_session_id, self._current_user_id)
+        log.info(
+            "📝 Started new session: %s for user: %s",
+            self._current_session_id,
+            self._current_user_id,
+        )
 
         return self._current_session_id
 
@@ -152,7 +160,7 @@ class AgentMemory:
 
         if context_path.exists():
             try:
-                with open(context_path, 'r') as f:
+                with open(context_path, "r") as f:
                     context = json.load(f)
                     return context.get("current_user_id") or context.get("user_id")
             except Exception as e:
@@ -167,7 +175,7 @@ class AgentMemory:
         agent: Optional[str] = None,
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        ttl_hours: Optional[int] = None
+        ttl_hours: Optional[int] = None,
     ) -> Optional[str]:
         """
         Store a memory entry.
@@ -186,10 +194,9 @@ class AgentMemory:
         # Use current session/user if not provided
         session_id = session_id or self._current_session_id
         user_id = user_id or self._current_user_id or self._get_user_id_from_context()
-        ttl_hours = ttl_hours or self.DEFAULT_TTL_HOURS
 
         # Build memory document
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         memory_doc = {
             "user_id": user_id,
             "session_id": session_id,
@@ -197,11 +204,18 @@ class AgentMemory:
             "type": memory_type,
             "agent": agent,
             "content": content,
-            "expires_at": now + timedelta(hours=ttl_hours)
         }
 
+        # Only set expires_at if ttl_hours is a positive value.
+        # Documents without expires_at are permanent (MongoDB TTL index ignores them).
+        if ttl_hours and ttl_hours > 0:
+            memory_doc["expires_at"] = now + timedelta(hours=ttl_hours)
+        elif ttl_hours is None:
+            # Default TTL for regular memories
+            memory_doc["expires_at"] = now + timedelta(hours=self.DEFAULT_TTL_HOURS)
+
         # Store in MongoDB or fallback
-        if self.mongodb_available and self.memory_collection:
+        if self.mongodb_available and self.memory_collection is not None:
             try:
                 result = self.memory_collection.insert_one(memory_doc)
                 log.debug("Stored memory: type=%s agent=%s", memory_type, agent)
@@ -223,9 +237,7 @@ class AgentMemory:
     def store_command(self, command: str, session_id: Optional[str] = None) -> Optional[str]:
         """Store a user voice command."""
         return self.store(
-            memory_type=MemoryType.COMMAND,
-            content={"command": command},
-            session_id=session_id
+            memory_type=MemoryType.COMMAND, content={"command": command}, session_id=session_id
         )
 
     def store_agent_action(
@@ -236,7 +248,7 @@ class AgentMemory:
         tools_used: List[str] = None,
         success: bool = True,
         duration_ms: Optional[int] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> Optional[str]:
         """Store an agent action/invocation."""
         return self.store(
@@ -247,9 +259,9 @@ class AgentMemory:
                 "output": output_text,
                 "tools_used": tools_used or [],
                 "success": success,
-                "duration_ms": duration_ms
+                "duration_ms": duration_ms,
             },
-            session_id=session_id
+            session_id=session_id,
         )
 
     def store_tool_call(
@@ -259,7 +271,7 @@ class AgentMemory:
         tool_input: Dict[str, Any],
         tool_output: str,
         success: bool = True,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> Optional[str]:
         """Store a tool call."""
         return self.store(
@@ -269,9 +281,9 @@ class AgentMemory:
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "tool_output": tool_output[:500] if tool_output else None,  # Truncate long outputs
-                "success": success
+                "success": success,
             },
-            session_id=session_id
+            session_id=session_id,
         )
 
     def store_error(
@@ -279,24 +291,83 @@ class AgentMemory:
         error_message: str,
         agent: Optional[str] = None,
         context: Optional[Dict] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> Optional[str]:
         """Store an error."""
         return self.store(
             memory_type=MemoryType.ERROR,
             agent=agent,
-            content={
-                "error": error_message,
-                "context": context
-            },
-            session_id=session_id
+            content={"error": error_message, "context": context},
+            session_id=session_id,
         )
 
-    def get_session_history(
-        self,
-        session_id: Optional[str] = None,
-        limit: int = 20
-    ) -> List[Dict]:
+    def store_preference(self, key: str, value: str, agent: Optional[str] = None) -> bool:
+        """Store a permanent user preference (no TTL expiration)."""
+        result = self.store(
+            memory_type=MemoryType.PREFERENCE,
+            content={"key": key, "value": value},
+            agent=agent,
+            ttl_hours=0,  # permanent
+        )
+        return result is not None
+
+    def get_preferences(self, limit: int = 20) -> list:
+        """Retrieve all stored user preferences."""
+        try:
+            if self.mongodb_available and self.memory_collection is not None:
+                cursor = (
+                    self.memory_collection.find({"type": MemoryType.PREFERENCE})
+                    .sort("timestamp", -1)
+                    .limit(limit)
+                )
+                return [
+                    {
+                        "key": doc["content"]["key"],
+                        "value": doc["content"]["value"],
+                        "agent": doc.get("agent"),
+                        "timestamp": doc.get("timestamp"),
+                    }
+                    for doc in cursor
+                ]
+            else:
+                return [
+                    {
+                        "key": m["content"]["key"],
+                        "value": m["content"]["value"],
+                        "agent": m.get("agent"),
+                        "timestamp": m.get("timestamp"),
+                    }
+                    for m in self._memory_fallback
+                    if m.get("type") == MemoryType.PREFERENCE
+                ][-limit:]
+        except Exception as e:
+            log.warning("Failed to get preferences: %s", e)
+            return []
+
+    def delete_preference(self, key: str) -> bool:
+        """Delete a stored preference by key."""
+        try:
+            if self.mongodb_available and self.memory_collection is not None:
+                result = self.memory_collection.delete_many(
+                    {"type": MemoryType.PREFERENCE, "content.key": key}
+                )
+                return result.deleted_count > 0
+            else:
+                before = len(self._memory_fallback)
+                self._memory_fallback = [
+                    m
+                    for m in self._memory_fallback
+                    if not (
+                        m.get("type") == MemoryType.PREFERENCE
+                        and m.get("content", {}).get("key") == key
+                    )
+                ]
+                return len(self._memory_fallback) < before
+        except Exception as e:
+            log.warning("Failed to delete preference '%s': %s", key, e)
+            return False
+
+    def get_session_history(self, session_id: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """
         Get memory entries for a specific session.
 
@@ -311,11 +382,13 @@ class AgentMemory:
         if not session_id:
             return []
 
-        if self.mongodb_available and self.memory_collection:
+        if self.mongodb_available and self.memory_collection is not None:
             try:
-                cursor = self.memory_collection.find(
-                    {"session_id": session_id}
-                ).sort("timestamp", 1).limit(limit)
+                cursor = (
+                    self.memory_collection.find({"session_id": session_id})
+                    .sort("timestamp", 1)
+                    .limit(limit)
+                )
 
                 return list(cursor)
             except PyMongoError as e:
@@ -329,7 +402,7 @@ class AgentMemory:
         user_id: Optional[str] = None,
         minutes: int = 30,
         limit: int = 10,
-        memory_types: List[str] = None
+        memory_types: List[str] = None,
     ) -> List[Dict]:
         """
         Get recent memories for a user (across sessions).
@@ -344,21 +417,18 @@ class AgentMemory:
             List of memory entries (most recent first)
         """
         user_id = user_id or self._current_user_id or self._get_user_id_from_context()
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
 
-        if self.mongodb_available and self.memory_collection:
+        if self.mongodb_available and self.memory_collection is not None:
             try:
-                query = {
-                    "user_id": user_id,
-                    "timestamp": {"$gte": cutoff}
-                }
+                query = {"user_id": user_id, "timestamp": {"$gte": cutoff}}
 
                 if memory_types:
                     query["type"] = {"$in": memory_types}
 
-                cursor = self.memory_collection.find(query).sort(
-                    "timestamp", DESCENDING
-                ).limit(limit)
+                cursor = (
+                    self.memory_collection.find(query).sort("timestamp", DESCENDING).limit(limit)
+                )
 
                 return list(cursor)
             except PyMongoError as e:
@@ -366,7 +436,8 @@ class AgentMemory:
 
         # In-memory fallback
         results = [
-            m for m in self._memory_fallback
+            m
+            for m in self._memory_fallback
             if m.get("user_id") == user_id and m.get("timestamp", datetime.min) >= cutoff
         ]
         if memory_types:
@@ -378,7 +449,7 @@ class AgentMemory:
         agent: Optional[str] = None,
         include_other_agents: bool = True,
         minutes: int = 15,
-        max_entries: int = 5
+        max_entries: int = 5,
     ) -> str:
         """
         Generate context string to inject into agent prompts.
@@ -397,7 +468,7 @@ class AgentMemory:
         memories = self.get_recent_memories(
             minutes=minutes,
             limit=max_entries * 2,  # Get more, then filter
-            memory_types=[MemoryType.COMMAND, MemoryType.AGENT_ACTION, MemoryType.RESULT]
+            memory_types=[MemoryType.COMMAND, MemoryType.AGENT_ACTION, MemoryType.RESULT],
         )
 
         if not memories:
@@ -416,7 +487,7 @@ class AgentMemory:
                 continue
 
             if mem_type == MemoryType.COMMAND:
-                context_lines.append(f"• User asked: \"{content.get('command', '')}\"")
+                context_lines.append(f'• User asked: "{content.get("command", "")}"')
 
             elif mem_type == MemoryType.AGENT_ACTION:
                 action_agent = mem_agent or "Unknown"
@@ -424,7 +495,9 @@ class AgentMemory:
                 tools = content.get("tools_used", [])
 
                 if tools:
-                    context_lines.append(f"• {action_agent} agent used {', '.join(tools)}: {output}")
+                    context_lines.append(
+                        f"• {action_agent} agent used {', '.join(tools)}: {output}"
+                    )
                 else:
                     context_lines.append(f"• {action_agent} agent responded: {output}")
 
@@ -441,27 +514,18 @@ class AgentMemory:
         """Get the last user command in the session."""
         session_id = session_id or self._current_session_id
 
-        memories = self.get_recent_memories(
-            minutes=60,
-            limit=1,
-            memory_types=[MemoryType.COMMAND]
-        )
+        memories = self.get_recent_memories(minutes=60, limit=1, memory_types=[MemoryType.COMMAND])
 
         if memories:
             return memories[0].get("content", {}).get("command")
         return None
 
-    def get_agent_history(
-        self,
-        agent: str,
-        minutes: int = 30,
-        limit: int = 5
-    ) -> List[Dict]:
+    def get_agent_history(self, agent: str, minutes: int = 30, limit: int = 5) -> List[Dict]:
         """Get recent actions for a specific agent."""
         all_memories = self.get_recent_memories(
             minutes=minutes,
             limit=limit * 3,
-            memory_types=[MemoryType.AGENT_ACTION, MemoryType.TOOL_CALL]
+            memory_types=[MemoryType.AGENT_ACTION, MemoryType.TOOL_CALL],
         )
 
         return [m for m in all_memories if m.get("agent") == agent][:limit]
@@ -472,7 +536,7 @@ class AgentMemory:
         if not session_id:
             return
 
-        if self.mongodb_available and self.memory_collection:
+        if self.mongodb_available and self.memory_collection is not None:
             try:
                 result = self.memory_collection.delete_many({"session_id": session_id})
                 log.info("Cleared %d memories for session %s", result.deleted_count, session_id)
@@ -486,21 +550,18 @@ class AgentMemory:
 
     def clear_old_memories(self, hours: int = 24):
         """Manually clear memories older than specified hours."""
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        if self.mongodb_available and self.memory_collection:
+        if self.mongodb_available and self.memory_collection is not None:
             try:
-                result = self.memory_collection.delete_many({
-                    "timestamp": {"$lt": cutoff}
-                })
+                result = self.memory_collection.delete_many({"timestamp": {"$lt": cutoff}})
                 log.info("Cleared %d old memories", result.deleted_count)
             except PyMongoError as e:
                 log.error("Failed to clear old memories: %s", e)
 
         # In-memory fallback
         self._memory_fallback = [
-            m for m in self._memory_fallback
-            if m.get("timestamp", datetime.min) >= cutoff
+            m for m in self._memory_fallback if m.get("timestamp", datetime.min) >= cutoff
         ]
 
     def close(self):
@@ -508,17 +569,12 @@ class AgentMemory:
         if self.db_client:
             try:
                 self.db_client.close()
-            except:
+            except Exception:
                 pass
 
 
-# Singleton instance
-_agent_memory_instance: Optional[AgentMemory] = None
-
-
 def get_agent_memory() -> AgentMemory:
-    """Get or create singleton AgentMemory instance."""
-    global _agent_memory_instance
-    if _agent_memory_instance is None:
-        _agent_memory_instance = AgentMemory()
-    return _agent_memory_instance
+    """Get or create singleton AgentMemory instance (delegates to ServiceContainer)."""
+    from src.utils.container import get_container
+
+    return get_container().agent_memory

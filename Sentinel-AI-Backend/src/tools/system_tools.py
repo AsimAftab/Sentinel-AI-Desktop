@@ -7,30 +7,37 @@ import psutil
 from datetime import datetime
 from langchain_core.tools import tool
 
+from src.utils.log_config import get_logger
+
+logger = get_logger("system_tools")
+
 # Platform-specific imports
-if sys.platform == 'win32':
+if sys.platform == "win32":
     try:
         from ctypes import cast, POINTER
         from comtypes import CLSCTX_ALL
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
         import screen_brightness_control as sbc
+
         WINDOWS_LIBS_AVAILABLE = True
     except ImportError:
         WINDOWS_LIBS_AVAILABLE = False
-        print("⚠️ System control libraries not installed. Install with: pip install pycaw screen-brightness-control psutil comtypes")
+        logger.warning("System control libraries not installed. Install with: pip install pycaw screen-brightness-control psutil comtypes")
 else:
     WINDOWS_LIBS_AVAILABLE = False
 
 # Screenshot imports
 try:
     import pyautogui
+
     SCREENSHOT_AVAILABLE = True
 except ImportError:
     SCREENSHOT_AVAILABLE = False
-    print("⚠️ Screenshot library not installed. Install with: pip install pyautogui pillow")
+    logger.warning("Screenshot library not installed. Install with: pip install pyautogui pillow")
 
 
 # --- Volume Control Tools ---
+
 
 @tool
 def increase_volume(amount: int = 10) -> str:
@@ -40,7 +47,7 @@ def increase_volume(amount: int = 10) -> str:
     Args:
         amount: Percentage to increase (1-100), default is 10
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Volume control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -82,7 +89,7 @@ def decrease_volume(amount: int = 10) -> str:
     Args:
         amount: Percentage to decrease (1-100), default is 10
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Volume control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -121,7 +128,7 @@ def set_volume(level: int) -> str:
     Args:
         level: Volume level (0-100)
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Volume control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -154,7 +161,7 @@ def get_current_volume() -> str:
     """
     Gets the current system volume level.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Volume control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -186,7 +193,7 @@ def mute_volume() -> str:
     """
     Mutes the system volume.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Volume control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -212,7 +219,7 @@ def unmute_volume() -> str:
     """
     Unmutes the system volume.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Volume control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -239,6 +246,7 @@ def unmute_volume() -> str:
 
 # --- Brightness Control Tools ---
 
+
 @tool
 def increase_brightness(amount: int = 10) -> str:
     """
@@ -247,7 +255,7 @@ def increase_brightness(amount: int = 10) -> str:
     Args:
         amount: Percentage to increase (1-100), default is 10
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Brightness control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -258,7 +266,11 @@ def increase_brightness(amount: int = 10) -> str:
         amount = max(1, min(100, amount))
 
         # Get current brightness
-        current = sbc.get_brightness()[0] if isinstance(sbc.get_brightness(), list) else sbc.get_brightness()
+        current = (
+            sbc.get_brightness()[0]
+            if isinstance(sbc.get_brightness(), list)
+            else sbc.get_brightness()
+        )
 
         # Calculate new brightness
         new_brightness = min(100, current + amount)
@@ -280,7 +292,7 @@ def decrease_brightness(amount: int = 10) -> str:
     Args:
         amount: Percentage to decrease (1-100), default is 10
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Brightness control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -291,7 +303,11 @@ def decrease_brightness(amount: int = 10) -> str:
         amount = max(1, min(100, amount))
 
         # Get current brightness
-        current = sbc.get_brightness()[0] if isinstance(sbc.get_brightness(), list) else sbc.get_brightness()
+        current = (
+            sbc.get_brightness()[0]
+            if isinstance(sbc.get_brightness(), list)
+            else sbc.get_brightness()
+        )
 
         # Calculate new brightness
         new_brightness = max(0, current - amount)
@@ -313,7 +329,7 @@ def set_brightness(level: int) -> str:
     Args:
         level: Brightness level (0-100)
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Brightness control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -337,7 +353,7 @@ def get_current_brightness() -> str:
     """
     Gets the current screen brightness level.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Brightness control is currently only supported on Windows."
 
     if not WINDOWS_LIBS_AVAILABLE:
@@ -345,7 +361,11 @@ def get_current_brightness() -> str:
 
     try:
         # Get brightness
-        brightness = sbc.get_brightness()[0] if isinstance(sbc.get_brightness(), list) else sbc.get_brightness()
+        brightness = (
+            sbc.get_brightness()[0]
+            if isinstance(sbc.get_brightness(), list)
+            else sbc.get_brightness()
+        )
 
         return f"💡 Current brightness: {brightness}%"
 
@@ -354,6 +374,7 @@ def get_current_brightness() -> str:
 
 
 # --- Application Control Tools ---
+
 
 @tool
 def open_application(app_name: str) -> str:
@@ -368,44 +389,46 @@ def open_application(app_name: str) -> str:
 
         # Common Windows applications mapping
         app_mappings = {
-            'notepad': 'notepad.exe',
-            'calculator': 'calc.exe',
-            'paint': 'mspaint.exe',
-            'chrome': 'chrome.exe',
-            'firefox': 'firefox.exe',
-            'edge': 'msedge.exe',
-            'explorer': 'explorer.exe',
-            'file explorer': 'explorer.exe',
-            'word': 'winword.exe',
-            'excel': 'excel.exe',
-            'powerpoint': 'powerpnt.exe',
-            'outlook': 'outlook.exe',
-            'spotify': 'spotify.exe',
-            'discord': 'discord.exe',
-            'vscode': 'code.exe',
-            'visual studio code': 'code.exe',
-            'cmd': 'cmd.exe',
-            'command prompt': 'cmd.exe',
-            'powershell': 'powershell.exe',
-            'task manager': 'taskmgr.exe',
-            'control panel': 'control.exe',
-            'settings': 'ms-settings:',
+            "notepad": "notepad.exe",
+            "calculator": "calc.exe",
+            "paint": "mspaint.exe",
+            "chrome": "chrome.exe",
+            "firefox": "firefox.exe",
+            "edge": "msedge.exe",
+            "explorer": "explorer.exe",
+            "file explorer": "explorer.exe",
+            "word": "winword.exe",
+            "excel": "excel.exe",
+            "powerpoint": "powerpnt.exe",
+            "outlook": "outlook.exe",
+            "spotify": "spotify.exe",
+            "discord": "discord.exe",
+            "vscode": "code.exe",
+            "visual studio code": "code.exe",
+            "cmd": "cmd.exe",
+            "command prompt": "cmd.exe",
+            "powershell": "powershell.exe",
+            "task manager": "taskmgr.exe",
+            "control panel": "control.exe",
+            "settings": "ms-settings:",
         }
 
-        # Get executable name
-        executable = app_mappings.get(app_name_lower, f"{app_name_lower}.exe")
+        # Only allow applications from the known whitelist — never execute arbitrary input
+        if app_name_lower not in app_mappings:
+            available = ", ".join(sorted(app_mappings.keys()))
+            return f"❌ Unknown application '{app_name}'. Supported applications: {available}"
 
-        # Special handling for Windows Settings
-        if executable == 'ms-settings:':
-            subprocess.Popen(['start', 'ms-settings:'], shell=True)
+        executable = app_mappings[app_name_lower]
+
+        # Special handling for Windows Settings URI
+        if executable == "ms-settings:":
+            subprocess.Popen(["start", "ms-settings:"], shell=True)
             return f"✅ Opened Windows Settings"
 
-        # Try to open the application
-        if sys.platform == 'win32':
-            # Use start command on Windows
-            subprocess.Popen(['start', '', executable], shell=True)
+        # Try to open the application — use list form to avoid shell injection
+        if sys.platform == "win32":
+            subprocess.Popen(["start", "", executable], shell=True)
         else:
-            # On other platforms, try direct execution
             subprocess.Popen([executable])
 
         return f"✅ Opened {app_name}"
@@ -427,34 +450,34 @@ def close_application(app_name: str) -> str:
 
         # Common application process names
         process_mappings = {
-            'notepad': 'notepad.exe',
-            'calculator': 'Calculator.exe',
-            'paint': 'mspaint.exe',
-            'chrome': 'chrome.exe',
-            'firefox': 'firefox.exe',
-            'edge': 'msedge.exe',
-            'word': 'WINWORD.EXE',
-            'excel': 'EXCEL.EXE',
-            'powerpoint': 'POWERPNT.EXE',
-            'outlook': 'OUTLOOK.EXE',
-            'spotify': 'Spotify.exe',
-            'discord': 'Discord.exe',
-            'vscode': 'Code.exe',
-            'visual studio code': 'Code.exe',
+            "notepad": "notepad.exe",
+            "calculator": "Calculator.exe",
+            "paint": "mspaint.exe",
+            "chrome": "chrome.exe",
+            "firefox": "firefox.exe",
+            "edge": "msedge.exe",
+            "word": "WINWORD.EXE",
+            "excel": "EXCEL.EXE",
+            "powerpoint": "POWERPNT.EXE",
+            "outlook": "OUTLOOK.EXE",
+            "spotify": "Spotify.exe",
+            "discord": "Discord.exe",
+            "vscode": "Code.exe",
+            "visual studio code": "Code.exe",
         }
 
         # Get process name
         process_name = process_mappings.get(app_name_lower, app_name_lower)
 
         # Add .exe if not present
-        if not process_name.endswith('.exe'):
-            process_name += '.exe'
+        if not process_name.endswith(".exe"):
+            process_name += ".exe"
 
         # Find and close the process
         closed_count = 0
-        for proc in psutil.process_iter(['name']):
+        for proc in psutil.process_iter(["name"]):
             try:
-                if proc.info['name'].lower() == process_name.lower():
+                if proc.info["name"].lower() == process_name.lower():
                     proc.terminate()
                     closed_count += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -480,28 +503,40 @@ def list_running_applications() -> str:
 
         # Common system processes to exclude
         system_processes = {
-            'svchost.exe', 'system', 'registry', 'smss.exe', 'csrss.exe',
-            'wininit.exe', 'services.exe', 'lsass.exe', 'winlogon.exe',
-            'dwm.exe', 'taskeng.exe', 'taskmgr.exe', 'explorer.exe',
-            'runtime broker', 'system idle process', 'audiodg.exe',
-            'conhost.exe', 'fontdrvhost.exe', 'sihost.exe', 'ctfmon.exe'
+            "svchost.exe",
+            "system",
+            "registry",
+            "smss.exe",
+            "csrss.exe",
+            "wininit.exe",
+            "services.exe",
+            "lsass.exe",
+            "winlogon.exe",
+            "dwm.exe",
+            "taskeng.exe",
+            "taskmgr.exe",
+            "explorer.exe",
+            "runtime broker",
+            "system idle process",
+            "audiodg.exe",
+            "conhost.exe",
+            "fontdrvhost.exe",
+            "sihost.exe",
+            "ctfmon.exe",
         }
 
-        for proc in psutil.process_iter(['name', 'pid']):
+        for proc in psutil.process_iter(["name", "pid"]):
             try:
-                proc_name = proc.info['name']
+                proc_name = proc.info["name"]
                 if proc_name and proc_name.lower() not in system_processes:
                     # Filter out duplicates and background processes
-                    if proc_name not in [p['name'] for p in processes]:
-                        processes.append({
-                            'name': proc_name,
-                            'pid': proc.info['pid']
-                        })
+                    if proc_name not in [p["name"] for p in processes]:
+                        processes.append({"name": proc_name, "pid": proc.info["pid"]})
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
 
         # Sort by name
-        processes.sort(key=lambda x: x['name'].lower())
+        processes.sort(key=lambda x: x["name"].lower())
 
         # Take top 20 most relevant
         processes = processes[:20]
@@ -512,7 +547,7 @@ def list_running_applications() -> str:
         result = "💻 **Running Applications:**\n\n"
         for i, proc in enumerate(processes, 1):
             # Clean up .exe extension for display
-            display_name = proc['name'].replace('.exe', '')
+            display_name = proc["name"].replace(".exe", "")
             result += f"{i}. {display_name}\n"
 
         return result
@@ -522,6 +557,7 @@ def list_running_applications() -> str:
 
 
 # --- Screenshot Tools ---
+
 
 @tool
 def take_screenshot(filename: str = None) -> str:
@@ -545,7 +581,7 @@ def take_screenshot(filename: str = None) -> str:
             filename = f"screenshot_{timestamp}"
 
         # Remove .png extension if user added it
-        if filename.endswith('.png'):
+        if filename.endswith(".png"):
             filename = filename[:-4]
 
         # Full file path
@@ -584,6 +620,7 @@ def get_screen_size() -> str:
 
 # --- Bluetooth Control Tools (Human-like UI Automation) ---
 
+
 @tool
 def open_bluetooth_settings() -> str:
     """
@@ -593,7 +630,7 @@ def open_bluetooth_settings() -> str:
     NOTE: If user wants to turn Bluetooth ON or OFF, use enable_bluetooth or disable_bluetooth instead!
     This tool only OPENS the settings panel.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth settings control is currently only supported on Windows."
 
     try:
@@ -601,7 +638,7 @@ def open_bluetooth_settings() -> str:
         current_state = _get_bluetooth_state()
 
         # Open Bluetooth settings via ms-settings URI
-        subprocess.Popen(['start', 'ms-settings:bluetooth'], shell=True)
+        subprocess.Popen(["start", "ms-settings:bluetooth"], shell=True)
 
         if current_state == "On":
             return "📶 Opened Bluetooth settings. Bluetooth is currently ON. You can pair devices or manage connections."
@@ -617,7 +654,7 @@ def open_bluetooth_settings() -> str:
 def _get_bluetooth_state() -> str:
     """Helper function to get current Bluetooth state (On/Off/NotFound)."""
     try:
-        ps_command = '''
+        ps_command = """
         Add-Type -AssemblyName System.Runtime.WindowsRuntime
         $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
         Function Await($WinRtTask, $ResultType) {
@@ -635,15 +672,15 @@ def _get_bluetooth_state() -> str:
         } else {
             Write-Output "NotFound"
         }
-        '''
+        """
         result = subprocess.run(
-            ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_command],
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
         return result.stdout.strip()
-    except:
+    except Exception:
         return "Unknown"
 
 
@@ -656,7 +693,7 @@ def toggle_bluetooth(action: str = "on") -> str:
     Args:
         action: "on" to enable Bluetooth, "off" to disable Bluetooth
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth control is currently only supported on Windows."
 
     if not SCREENSHOT_AVAILABLE:
@@ -686,17 +723,17 @@ def toggle_bluetooth(action: str = "on") -> str:
             return "📴 Bluetooth is already OFF. No action needed."
 
         # Need to toggle - open Bluetooth settings
-        subprocess.Popen(['start', 'ms-settings:bluetooth'], shell=True)
+        subprocess.Popen(["start", "ms-settings:bluetooth"], shell=True)
         time.sleep(2.0)  # Wait for settings to fully open
 
         # Navigate to the Bluetooth toggle switch
         # Tab through the settings page to reach the toggle
         for _ in range(3):  # Tab a few times to reach the toggle
-            pyautogui.press('tab')
+            pyautogui.press("tab")
             time.sleep(0.15)
 
         # Press Space to toggle the switch
-        pyautogui.press('space')
+        pyautogui.press("space")
         time.sleep(1.0)  # Wait for toggle to take effect
 
         # Verify the change happened
@@ -704,7 +741,7 @@ def toggle_bluetooth(action: str = "on") -> str:
         is_now_on = new_state == "On"
 
         # Close settings window
-        pyautogui.hotkey('alt', 'F4')
+        pyautogui.hotkey("alt", "F4")
         time.sleep(0.3)
 
         # Report result
@@ -722,9 +759,9 @@ def toggle_bluetooth(action: str = "on") -> str:
     except Exception as e:
         # Fall back to opening settings
         try:
-            subprocess.Popen(['start', 'ms-settings:bluetooth'], shell=True)
+            subprocess.Popen(["start", "ms-settings:bluetooth"], shell=True)
             return f"⚠️ Could not automate toggle ({e}). Opened Bluetooth settings - please toggle manually."
-        except:
+        except Exception:
             return f"Error toggling Bluetooth: {e}"
 
 
@@ -734,7 +771,7 @@ def toggle_bluetooth_quick() -> str:
     Quick toggle Bluetooth using Windows Action Center (Win + A).
     Simulates human clicking on the Bluetooth quick action button.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth control is currently only supported on Windows."
 
     if not SCREENSHOT_AVAILABLE:
@@ -744,7 +781,7 @@ def toggle_bluetooth_quick() -> str:
         import time
 
         # Open Windows Action Center with Win + A
-        pyautogui.hotkey('win', 'a')
+        pyautogui.hotkey("win", "a")
         time.sleep(1.2)  # Wait for Action Center to fully open
 
         # The quick actions panel has Bluetooth as one of the buttons
@@ -769,14 +806,14 @@ def toggle_bluetooth_quick() -> str:
         time.sleep(0.5)
 
         # Close Action Center
-        pyautogui.press('escape')
+        pyautogui.press("escape")
 
         return "📶 Clicked Bluetooth quick action in Action Center. Please check if Bluetooth status changed."
 
     except Exception as e:
         try:
-            pyautogui.press('escape')  # Close Action Center if open
-        except:
+            pyautogui.press("escape")  # Close Action Center if open
+        except Exception:
             pass
         return f"Error with quick toggle: {e}. Try using 'open bluetooth settings' instead."
 
@@ -786,12 +823,12 @@ def get_bluetooth_status() -> str:
     """
     Gets the current Bluetooth status (enabled/disabled) and lists paired devices.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth status check is currently only supported on Windows."
 
     try:
         # Use PowerShell to check status (read-only, doesn't need UI)
-        ps_command = '''
+        ps_command = """
         Add-Type -AssemblyName System.Runtime.WindowsRuntime
         $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
         Function Await($WinRtTask, $ResultType) {
@@ -809,13 +846,13 @@ def get_bluetooth_status() -> str:
         } else {
             Write-Output "Status:NotFound"
         }
-        '''
+        """
 
         result = subprocess.run(
-            ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_command],
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
             capture_output=True,
             text=True,
-            timeout=15
+            timeout=15,
         )
 
         output = result.stdout.strip()
@@ -834,13 +871,13 @@ def get_bluetooth_status() -> str:
         try:
             devices_cmd = 'Get-PnpDevice -Class Bluetooth | Where-Object { $_.Status -eq "OK" } | Select-Object -ExpandProperty FriendlyName'
             devices_result = subprocess.run(
-                ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', devices_cmd],
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", devices_cmd],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
             )
 
-            devices = [d.strip() for d in devices_result.stdout.strip().split('\n') if d.strip()]
+            devices = [d.strip() for d in devices_result.stdout.strip().split("\n") if d.strip()]
 
             if devices:
                 status += f"\n\n🔗 **Connected/Paired Devices ({len(devices)}):**\n"
@@ -849,7 +886,7 @@ def get_bluetooth_status() -> str:
             else:
                 status += "\n\nNo paired Bluetooth devices found."
 
-        except:
+        except Exception:
             pass
 
         return status
@@ -866,7 +903,7 @@ def enable_bluetooth() -> str:
     Enables (turns on) Bluetooth. Checks current state first - if already on, confirms it.
     If off, opens settings and toggles it on.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth control is currently only supported on Windows."
 
     # Check current state first
@@ -888,7 +925,7 @@ def disable_bluetooth() -> str:
     Disables (turns off) Bluetooth. Checks current state first - if already off, confirms it.
     If on, opens settings and toggles it off.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth control is currently only supported on Windows."
 
     # Check current state first
@@ -910,7 +947,7 @@ def open_bluetooth_pairing() -> str:
     Opens Bluetooth pairing mode - opens the 'Add a device' dialog.
     Simulates a human clicking 'Add Bluetooth or other device'.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "Bluetooth pairing is currently only supported on Windows."
 
     if not SCREENSHOT_AVAILABLE:
@@ -920,15 +957,15 @@ def open_bluetooth_pairing() -> str:
         import time
 
         # Open Bluetooth settings
-        subprocess.Popen(['start', 'ms-settings:bluetooth'], shell=True)
+        subprocess.Popen(["start", "ms-settings:bluetooth"], shell=True)
         time.sleep(1.5)
 
         # Press Tab to navigate to "Add Bluetooth or other device" button
-        pyautogui.press('tab')
+        pyautogui.press("tab")
         time.sleep(0.2)
 
         # Press Enter to open Add Device dialog
-        pyautogui.press('enter')
+        pyautogui.press("enter")
         time.sleep(1.0)
 
         return "📶 Opened 'Add a device' dialog. Select the type of device you want to pair."
@@ -939,17 +976,18 @@ def open_bluetooth_pairing() -> str:
 
 # --- WiFi Control Tools (Human-like UI Automation) ---
 
+
 @tool
 def open_wifi_settings() -> str:
     """
     Opens Windows WiFi settings panel.
     Use this to manage WiFi connections, view available networks, or toggle WiFi.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "WiFi settings control is currently only supported on Windows."
 
     try:
-        subprocess.Popen(['start', 'ms-settings:network-wifi'], shell=True)
+        subprocess.Popen(["start", "ms-settings:network-wifi"], shell=True)
         return "📡 Opened WiFi settings. You can now connect to networks or toggle WiFi."
 
     except Exception as e:
@@ -965,7 +1003,7 @@ def toggle_wifi(action: str = "on") -> str:
     Args:
         action: "on" to enable WiFi, "off" to disable WiFi
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "WiFi control is currently only supported on Windows."
 
     if not SCREENSHOT_AVAILABLE:
@@ -981,21 +1019,21 @@ def toggle_wifi(action: str = "on") -> str:
         enable = action_lower in ["on", "enable"]
 
         # Open WiFi settings
-        subprocess.Popen(['start', 'ms-settings:network-wifi'], shell=True)
+        subprocess.Popen(["start", "ms-settings:network-wifi"], shell=True)
         time.sleep(1.5)
 
         # Navigate to WiFi toggle using Tab
-        pyautogui.press('tab')
+        pyautogui.press("tab")
         time.sleep(0.2)
-        pyautogui.press('tab')
+        pyautogui.press("tab")
         time.sleep(0.2)
 
         # Press Space to toggle
-        pyautogui.press('space')
+        pyautogui.press("space")
         time.sleep(0.5)
 
         # Close settings
-        pyautogui.hotkey('alt', 'F4')
+        pyautogui.hotkey("alt", "F4")
 
         status_emoji = "📡" if enable else "📴"
         status_text = "enabled" if enable else "disabled"
@@ -1004,9 +1042,11 @@ def toggle_wifi(action: str = "on") -> str:
 
     except Exception as e:
         try:
-            subprocess.Popen(['start', 'ms-settings:network-wifi'], shell=True)
-            return f"⚠️ Could not automate toggle ({e}). Opened WiFi settings - please toggle manually."
-        except:
+            subprocess.Popen(["start", "ms-settings:network-wifi"], shell=True)
+            return (
+                f"⚠️ Could not automate toggle ({e}). Opened WiFi settings - please toggle manually."
+            )
+        except Exception:
             return f"Error toggling WiFi: {e}"
 
 
@@ -1016,7 +1056,7 @@ def toggle_wifi_quick() -> str:
     Quick toggle WiFi using Windows Action Center (Win + A).
     Simulates human clicking on the WiFi quick action button.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "WiFi control is currently only supported on Windows."
 
     if not SCREENSHOT_AVAILABLE:
@@ -1026,7 +1066,7 @@ def toggle_wifi_quick() -> str:
         import time
 
         # Open Windows Action Center
-        pyautogui.hotkey('win', 'a')
+        pyautogui.hotkey("win", "a")
         time.sleep(1.2)
 
         # Get screen size
@@ -1041,14 +1081,14 @@ def toggle_wifi_quick() -> str:
         time.sleep(0.5)
 
         # Close Action Center
-        pyautogui.press('escape')
+        pyautogui.press("escape")
 
         return "📡 Clicked WiFi quick action in Action Center. Please check if WiFi status changed."
 
     except Exception as e:
         try:
-            pyautogui.press('escape')
-        except:
+            pyautogui.press("escape")
+        except Exception:
             pass
         return f"Error with quick toggle: {e}. Try using 'open wifi settings' instead."
 
@@ -1058,16 +1098,12 @@ def get_wifi_status() -> str:
     """
     Gets the current WiFi status and connected network name.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "WiFi status check is currently only supported on Windows."
 
     try:
         result = subprocess.run(
-            'netsh wlan show interfaces',
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=10
+            "netsh wlan show interfaces", shell=True, capture_output=True, text=True, timeout=10
         )
 
         output = result.stdout
@@ -1076,18 +1112,18 @@ def get_wifi_status() -> str:
             return "❌ No WiFi adapter found or WiFi is disabled."
 
         status_info = {}
-        for line in output.split('\n'):
-            if ':' in line:
-                key, _, value = line.partition(':')
+        for line in output.split("\n"):
+            if ":" in line:
+                key, _, value = line.partition(":")
                 status_info[key.strip().lower()] = value.strip()
 
-        state = status_info.get('state', 'Unknown')
-        ssid = status_info.get('ssid', 'Not connected')
-        signal = status_info.get('signal', 'N/A')
+        state = status_info.get("state", "Unknown")
+        ssid = status_info.get("ssid", "Not connected")
+        signal = status_info.get("signal", "N/A")
 
-        if state.lower() == 'connected':
+        if state.lower() == "connected":
             return f"📡 WiFi is **ON** and connected\n🌐 Network: {ssid}\n📶 Signal: {signal}"
-        elif state.lower() == 'disconnected':
+        elif state.lower() == "disconnected":
             return "📡 WiFi is **ON** but not connected to any network."
         else:
             return f"📴 WiFi status: {state}"
@@ -1104,7 +1140,7 @@ def show_available_wifi_networks() -> str:
     Shows available WiFi networks by opening the network flyout.
     Simulates clicking on the WiFi icon in the taskbar.
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "WiFi control is currently only supported on Windows."
 
     if not SCREENSHOT_AVAILABLE:
@@ -1115,7 +1151,7 @@ def show_available_wifi_networks() -> str:
 
         # Method 1: Use keyboard shortcut to open network flyout
         # Win + A opens Action Center, then we can access WiFi
-        pyautogui.hotkey('win', 'a')
+        pyautogui.hotkey("win", "a")
         time.sleep(1.0)
 
         # Click on the WiFi section to expand available networks
@@ -1129,7 +1165,7 @@ def show_available_wifi_networks() -> str:
 
     except Exception as e:
         # Fallback: open settings
-        subprocess.Popen(['start', 'ms-settings:network-wifi'], shell=True)
+        subprocess.Popen(["start", "ms-settings:network-wifi"], shell=True)
         return f"Opened WiFi settings instead. You can see available networks there."
 
 
@@ -1142,19 +1178,13 @@ def connect_to_wifi(network_name: str) -> str:
     Args:
         network_name: Name (SSID) of the WiFi network to connect to
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return "WiFi control is currently only supported on Windows."
 
     try:
         # Try to connect using netsh (works for saved networks)
         cmd = f'netsh wlan connect name="{network_name}"'
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
 
         if result.returncode == 0:
             return f"📡 Connecting to '{network_name}'... Connection request sent successfully."
@@ -1164,11 +1194,136 @@ def connect_to_wifi(network_name: str) -> str:
                 return f"❌ Network '{network_name}' not found in saved networks. Please connect manually through WiFi settings."
             else:
                 # Open WiFi settings as fallback
-                subprocess.Popen(['start', 'ms-settings:network-wifi'], shell=True)
+                subprocess.Popen(["start", "ms-settings:network-wifi"], shell=True)
                 return f"⚠️ Could not connect to '{network_name}' automatically. Opened WiFi settings - please connect manually."
 
     except Exception as e:
         return f"Error connecting to WiFi: {e}"
+
+
+@tool
+def get_network_status() -> str:
+    """
+    Returns current network connection status, IP addresses, and traffic statistics.
+    """
+    try:
+        result = "🌐 **Network Status**\n\n"
+
+        # IP addresses per interface
+        addrs = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
+        result += "**Interfaces:**\n"
+        for iface, addr_list in addrs.items():
+            iface_stat = stats.get(iface)
+            status = "🟢 Up" if iface_stat and iface_stat.isup else "🔴 Down"
+            for addr in addr_list:
+                if addr.family.name == "AF_INET":  # IPv4
+                    result += f"  {iface} [{status}]: {addr.address}\n"
+
+        # Total traffic
+        io = psutil.net_io_counters()
+        sent_mb = io.bytes_sent / (1024**2)
+        recv_mb = io.bytes_recv / (1024**2)
+        result += f"\n📤 Sent: {sent_mb:.1f} MB\n"
+        result += f"📥 Received: {recv_mb:.1f} MB\n"
+
+        return result.strip()
+    except Exception as e:
+        return f"Error getting network status: {e}"
+
+
+@tool
+def get_battery_info() -> str:
+    """
+    Returns battery charge level, charging status, and estimated time remaining.
+    """
+    try:
+        battery = psutil.sensors_battery()
+        if battery is None:
+            return "🔌 No battery detected — this device appears to be a desktop or does not expose battery info."
+
+        percent = battery.percent
+        plugged = battery.power_plugged
+        secs_left = battery.secsleft
+
+        status = "🔌 Plugged In (Charging)" if plugged else "🔋 On Battery"
+        bar_filled = int(percent / 10)
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+
+        result = f"🔋 **Battery Info**\n\n"
+        result += f"Charge: [{bar}] {percent:.0f}%\n"
+        result += f"Status: {status}\n"
+
+        if not plugged and secs_left != psutil.POWER_TIME_UNLIMITED and secs_left > 0:
+            hours, rem = divmod(int(secs_left), 3600)
+            mins = rem // 60
+            result += f"⏳ Estimated time remaining: {hours}h {mins}m\n"
+        elif plugged:
+            result += "⚡ Charging — time to full not available\n"
+
+        return result.strip()
+    except Exception as e:
+        return f"Error getting battery info: {e}"
+
+
+@tool
+def get_disk_usage(path: str = "C:\\") -> str:
+    """
+    Returns disk usage information (total, used, free) for a given drive or path.
+
+    Args:
+        path: Drive or path to check (default: C:\\). Use '/' on Linux/Mac.
+    """
+    try:
+        usage = psutil.disk_usage(path)
+        total_gb = usage.total / (1024**3)
+        used_gb = usage.used / (1024**3)
+        free_gb = usage.free / (1024**3)
+        percent = usage.percent
+
+        bar_filled = int(percent / 10)
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+
+        return (
+            f"💾 **Disk Usage: {path}**\n\n"
+            f"Usage:  [{bar}] {percent:.0f}%\n"
+            f"Total:  {total_gb:.1f} GB\n"
+            f"Used:   {used_gb:.1f} GB\n"
+            f"Free:   {free_gb:.1f} GB"
+        )
+    except Exception as e:
+        return f"Error getting disk usage for '{path}': {e}"
+
+
+@tool
+def list_running_processes(top_n: int = 10) -> str:
+    """
+    Lists the top running processes sorted by CPU usage.
+
+    Args:
+        top_n: Number of processes to show (1-20, default 10)
+    """
+    try:
+        top_n = max(1, min(20, top_n))
+        procs = []
+        for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
+            try:
+                info = proc.info
+                mem_mb = (info["memory_info"].rss / (1024**2)) if info["memory_info"] else 0
+                procs.append((info["cpu_percent"] or 0, mem_mb, info["pid"], info["name"] or ""))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        procs.sort(reverse=True)
+        result = f"⚙️ **Top {top_n} Processes by CPU Usage**\n\n"
+        result += f"{'PID':<8} {'Name':<28} {'CPU%':>6} {'Mem(MB)':>10}\n"
+        result += "─" * 56 + "\n"
+        for cpu, mem, pid, name in procs[:top_n]:
+            result += f"{pid:<8} {name[:27]:<28} {cpu:>5.1f}% {mem:>9.1f}\n"
+
+        return result.strip()
+    except Exception as e:
+        return f"Error listing processes: {e}"
 
 
 # System tools list
@@ -1207,4 +1362,9 @@ system_tools = [
     get_wifi_status,
     show_available_wifi_networks,
     connect_to_wifi,
+    # System info
+    get_network_status,
+    get_battery_info,
+    get_disk_usage,
+    list_running_processes,
 ]

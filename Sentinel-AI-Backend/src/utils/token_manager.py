@@ -10,17 +10,23 @@ from pathlib import Path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
+from src.utils.log_config import configure_logging
+
+configure_logging()
+
 # Try to import MongoDB - fall back to file-based if not available
 try:
     from pymongo import MongoClient
     from bson import ObjectId
+
     MONGODB_AVAILABLE = True
 except ImportError:
     MONGODB_AVAILABLE = False
-    print("⚠️ pymongo not installed. Tokens will use file-based fallback.")
+    logging.getLogger("token_manager").warning(
+        "pymongo not installed. Tokens will use file-based fallback."
+    )
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
+log = logging.getLogger("token_manager")
 
 
 class TokenManager:
@@ -69,7 +75,7 @@ class TokenManager:
 
         if context_path.exists():
             try:
-                with open(context_path, 'r') as f:
+                with open(context_path, "r") as f:
                     context = json.load(f)
                     user_id = context.get("current_user_id") or context.get("user_id")
                     if user_id:
@@ -108,7 +114,7 @@ class TokenManager:
             token_str = doc["token"]
             if isinstance(token_str, bytes):
                 # Handle legacy binary tokens (migration path)
-                token_dict = json.loads(token_str.decode('utf-8'))
+                token_dict = json.loads(token_str.decode("utf-8"))
             else:
                 # New plain JSON string format
                 token_dict = json.loads(token_str)
@@ -128,7 +134,7 @@ class TokenManager:
             return None
 
         try:
-            with open(token_path, 'r') as f:
+            with open(token_path, "r") as f:
                 token_dict = json.load(f)
                 log.info("✅ Retrieved token from file: %s", token_path)
                 return token_dict
@@ -136,7 +142,80 @@ class TokenManager:
             log.warning("Failed to read token from file %s: %s", token_path, e)
             return None
 
-    def get_calendar_credentials(self, user_id: Optional[str] = None, scopes: list = None) -> Optional[Credentials]:
+    def get_gmail_credentials(self, user_id: Optional[str] = None) -> Optional[Credentials]:
+        """
+        Get Gmail credentials for a user.
+        Tries MongoDB ("Gmail" service) first, then falls back to gmail_token.json.
+
+        Args:
+            user_id: User ID to retrieve token for (if None, uses context)
+
+        Returns:
+            Credentials object or None
+        """
+        scopes = [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/gmail.compose",
+            "https://www.googleapis.com/auth/gmail.modify",
+        ]
+
+        if user_id is None:
+            user_id = self.get_user_id_from_context()
+
+        # Try MongoDB first
+        token_dict = self.get_token_from_db("Gmail", user_id)
+
+        # Fallback to gmail_token.json
+        if not token_dict:
+            log.info("Falling back to file-based Gmail token...")
+            token_paths = [
+                self.backend_dir / "gmail_token.json",
+                self.frontend_dir / "gmail_token.json",
+            ]
+            for token_path in token_paths:
+                token_dict = self.get_token_from_file(token_path)
+                if token_dict:
+                    break
+
+        if not token_dict:
+            log.error("❌ No Gmail token found for user_id=%s", user_id)
+            return None
+
+        # Handle "raw" format
+        if "raw" in token_dict and isinstance(token_dict["raw"], str):
+            try:
+                token_dict = json.loads(token_dict["raw"])
+            except Exception:
+                pass
+
+        try:
+            creds = Credentials.from_authorized_user_info(token_dict, scopes)
+
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    log.info("Gmail token expired, refreshing...")
+                    creds.refresh(Request())
+                    log.info("✅ Gmail token refreshed")
+
+                    # Persist refreshed token to file
+                    token_path = self.backend_dir / "gmail_token.json"
+                    with open(token_path, "w") as f:
+                        f.write(creds.to_json())
+
+                except Exception as e:
+                    log.error("Failed to refresh Gmail token: %s", e)
+                    return None
+
+            return creds
+
+        except Exception as e:
+            log.exception("Failed to create Gmail Credentials: %s", e)
+            return None
+
+    def get_calendar_credentials(
+        self, user_id: Optional[str] = None, scopes: list = None
+    ) -> Optional[Credentials]:
         """
         Get Google Calendar credentials for a user.
         Tries MongoDB first, then falls back to file-based tokens.
@@ -150,8 +229,8 @@ class TokenManager:
         """
         if scopes is None:
             scopes = [
-                'https://www.googleapis.com/auth/calendar',
-                'https://www.googleapis.com/auth/calendar.events'
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.events",
             ]
 
         # Auto-detect user_id if not provided

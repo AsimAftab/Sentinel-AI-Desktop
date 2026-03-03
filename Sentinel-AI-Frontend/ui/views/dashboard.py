@@ -1,9 +1,43 @@
+import logging
+
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFrame, QMessageBox, QGridLayout, QSizePolicy, QScrollArea, QProgressDialog
+    QWidget,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame,
+    QMessageBox,
+    QGridLayout,
+    QSizePolicy,
+    QScrollArea,
+    QProgressDialog,
 )
-from PyQt5.QtCore import Qt, QSize, QTimer
+from PyQt5.QtCore import Qt, QSize, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
+
+logger = logging.getLogger(__name__)
+
+
+class OAuthThread(QThread):
+    """Background thread for OAuth service connection — keeps Qt UI responsive."""
+
+    finished = pyqtSignal(bool, str)  # (success, message)
+
+    def __init__(self, service_manager, internal_name):
+        super().__init__()
+        self.service_manager = service_manager
+        self.internal_name = internal_name
+
+    def run(self):
+        try:
+            future = self.service_manager.connect(self.internal_name)
+            success, message = future.result()
+            self.finished.emit(success, message)
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
 import qtawesome as qta
 import os
 from auth.session_manager import SessionManager
@@ -21,11 +55,8 @@ class DashboardPage(QWidget):
             self._initialize_dashboard(main_app, username)
         except Exception as e:
             import traceback
-            print("=" * 60)
-            print("❌ DASHBOARD INITIALIZATION ERROR:")
-            print("=" * 60)
-            traceback.print_exc()
-            print("=" * 60)
+
+            logger.error("Dashboard initialization error", exc_info=True)
             QMessageBox.critical(self, "Dashboard Error", f"Failed to load dashboard:\n\n{str(e)}")
             if main_app:
                 main_app.show_login()
@@ -37,7 +68,9 @@ class DashboardPage(QWidget):
 
         # Check if user is logged in using SessionManager
         if not SessionManager.is_logged_in(self.username):
-            QMessageBox.critical(self, "Access Denied", "Your session has expired or you're not logged in.")
+            QMessageBox.critical(
+                self, "Access Denied", "Your session has expired or you're not logged in."
+            )
             if self.main_app:
                 self.main_app.show_login()
             return
@@ -48,7 +81,7 @@ class DashboardPage(QWidget):
             with open(qss_path, "r") as f:
                 self.setStyleSheet(f.read())
         except Exception as e:
-            print(f"Failed to load dashboard.qss: {e}")
+            logger.warning("Failed to load dashboard.qss: %s", e)
 
         # Fetch user_id from MongoDB
         self.user_id = None
@@ -56,12 +89,12 @@ class DashboardPage(QWidget):
         try:
             user_service = UserService()
             db_user = user_service.get_user_by_username(self.username)
-            if db_user and '_id' in db_user:
-                self.user_id = str(db_user['_id'])
-                self.fullname = db_user.get('fullname', self.username)
-                print(f"✅ Dashboard: Fetched user_id: {self.user_id}")
+            if db_user and "_id" in db_user:
+                self.user_id = str(db_user["_id"])
+                self.fullname = db_user.get("fullname", self.username)
+                logger.info("Dashboard: Fetched user_id: %s", self.user_id)
         except Exception as e:
-            print(f"⚠️ Dashboard: Failed to fetch user_id: {e}")
+            logger.warning("Dashboard: Failed to fetch user_id: %s", e)
 
         # Initialize service manager, token store, and user context writer
         self.service_manager = ServiceManager()
@@ -75,7 +108,7 @@ class DashboardPage(QWidget):
             "Slack": "Slack",
             "Microsoft Teams": "Teams",
             "YouTube Music": "YouTubeMusic",
-            "Spotify": "Spotify"
+            "Spotify": "Spotify",
         }
 
         # Define services list with metadata (display_name, description, icon)
@@ -86,7 +119,7 @@ class DashboardPage(QWidget):
             ("Slack", "Team messaging and collaboration", "fa5b.slack"),
             ("Microsoft Teams", "Chat, meetings, and collaboration", "fa5b.microsoft"),
             ("YouTube Music", "Music streaming and playlists", "fa5b.youtube"),
-            ("Spotify", "Music and podcast streaming", "fa5b.spotify")
+            ("Spotify", "Music and podcast streaming", "fa5b.spotify"),
         ]
 
         # Load actual service connection status from MongoDB
@@ -109,16 +142,18 @@ class DashboardPage(QWidget):
 
             # Get the project root (3 levels up from dashboard.py)
             current_file_dir = os.path.dirname(os.path.abspath(__file__))  # .../ui/views
-            frontend_dir = os.path.dirname(os.path.dirname(current_file_dir))  # .../Sentinel-AI-Frontend
+            frontend_dir = os.path.dirname(
+                os.path.dirname(current_file_dir)
+            )  # .../Sentinel-AI-Frontend
             project_root = os.path.dirname(frontend_dir)  # .../Sentinel-AI-Desktop
             integration_path = os.path.join(project_root, "integration")
 
-            print(f"🔍 Looking for event_bus.py at: {integration_path}")
+            logger.debug("Looking for event_bus.py at: %s", integration_path)
 
             if os.path.exists(integration_path):
                 if integration_path not in sys.path:
                     sys.path.insert(0, integration_path)
-                    print(f"✅ Added to sys.path: {integration_path}")
+                    logger.debug("Added to sys.path: %s", integration_path)
 
                 # Add project root to path for integration package import
                 if str(project_root) not in sys.path:
@@ -137,28 +172,38 @@ class DashboardPage(QWidget):
                 self.backend_status = "Connecting to backend..."
                 self.backend_color = "#f59e0b"  # Orange (waiting for status)
 
-                # Set up timer for status updates
+                # Prefer zero-latency Qt signal bridge when available
+                self._qt_bridge = None
+                try:
+                    from integration.event_bus import QtEventBridge
+                    self._qt_bridge = QtEventBridge()
+                    self._qt_bridge.event_received.connect(self._handle_event)
+                    self.event_bus.set_qt_bridge(self._qt_bridge)
+                    logger.info("Dashboard: Using Qt signal bridge for instant event delivery")
+                except (ImportError, Exception) as e:
+                    logger.debug("Qt signal bridge unavailable, falling back to polling: %s", e)
+
+                # Fallback QTimer polling (only active if Qt bridge is not available)
                 self.backend_status_timer = QTimer()
                 self.backend_status_timer.timeout.connect(self.update_backend_status)
-                self.backend_status_timer.start(100)  # Check every 100ms (faster initially)
+                if self._qt_bridge is None:
+                    self._idle_poll_count = 0
+                    self._max_idle_polls = 20
+                    self.backend_status_timer.start(100)
+                    QTimer.singleShot(10, self.update_backend_status)
 
-                # Do an immediate status check
-                QTimer.singleShot(10, self.update_backend_status)
-
-                print("✅ Dashboard: Connected to backend communication bus - waiting for status...")
+                logger.info(
+                    "Dashboard: Connected to backend communication bus - waiting for status..."
+                )
             else:
-                print(f"⚠️ Integration path not found: {integration_path}")
+                logger.warning("Integration path not found: %s", integration_path)
                 self.comm_bus = None
 
         except ImportError as e:
-            print(f"ℹ️ Backend communication not available (import error): {e}")
-            import traceback
-            traceback.print_exc()
+            logger.info("Backend communication not available (import error): %s", e, exc_info=True)
             self.comm_bus = None
         except Exception as e:
-            print(f"⚠️ Could not connect to backend communication bus: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning("Could not connect to backend communication bus: %s", e, exc_info=True)
             self.comm_bus = None
 
         # Main horizontal layout (sidebar + content)
@@ -171,8 +216,8 @@ class DashboardPage(QWidget):
         main_layout.addWidget(sidebar)
 
         # ===== MAIN CONTENT AREA =====
-        content_area = self.create_content_area()
-        main_layout.addWidget(content_area)
+        self._content_area = self.create_content_area()
+        main_layout.addWidget(self._content_area)
 
     def _load_service_status(self):
         """Load actual service connection status from MongoDB."""
@@ -189,9 +234,9 @@ class DashboardPage(QWidget):
                     result = self.token_store.get_token(internal_name, self.user_id)
                     is_connected = result.get("ok", False)
                     if is_connected:
-                        print(f"✅ Service '{display_name}' ({internal_name}) is connected")
+                        logger.info("Service '%s' (%s) is connected", display_name, internal_name)
                 except Exception as e:
-                    print(f"⚠️ Error checking connection for {display_name}: {e}")
+                    logger.warning("Error checking connection for %s: %s", display_name, e)
 
             services_with_status.append((display_name, description, icon, is_connected))
 
@@ -202,38 +247,28 @@ class DashboardPage(QWidget):
         if self.user_id and self.username:
             additional_data = {}
             if self.fullname:
-                additional_data['fullname'] = self.fullname
+                additional_data["fullname"] = self.fullname
             self.user_context_writer.write_user_context(
-                self.user_id,
-                self.username,
-                additional_data
+                self.user_id, self.username, additional_data
             )
 
     def _refresh_dashboard(self):
-        """Reload service status and refresh the entire dashboard."""
-        print("🔄 Refreshing dashboard...")
+        """Reload service status and refresh only the content area (sidebar unchanged)."""
+        logger.info("Refreshing dashboard content...")
 
         # Reload service status from MongoDB
         self.services = self._load_service_status()
 
-        # Clear and rebuild the layout
-        # Get the main layout
+        # Replace only the content area — sidebar is untouched (no flicker, no DB re-queries)
         layout = self.layout()
+        old_content = self._content_area
+        self._content_area = self.create_content_area()
+        layout.addWidget(self._content_area)
 
-        # Clear all widgets
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        # Schedule old content deletion after Qt processes the layout update
+        old_content.deleteLater()
 
-        # Rebuild sidebar and content area
-        sidebar = self.create_sidebar()
-        layout.addWidget(sidebar)
-
-        content_area = self.create_content_area()
-        layout.addWidget(content_area)
-
-        print("✅ Dashboard refreshed")
+        logger.info("Dashboard content refreshed")
 
     def create_sidebar(self):
         """Create the left navigation sidebar"""
@@ -262,11 +297,18 @@ class DashboardPage(QWidget):
         nav_items = [
             ("Dashboard", "fa5s.th-large", True),
             ("Home", "fa5s.home", False),
-            ("Settings", "fa5s.cog", False)
+            ("Settings", "fa5s.cog", False),
         ]
 
         for label, icon_name, is_active in nav_items:
             btn = self.create_nav_button(label, icon_name, is_active)
+            # Connect button click to appropriate handler
+            if label == "Settings":
+                btn.clicked.connect(self.show_settings)
+            elif label == "Home":
+                btn.clicked.connect(self.show_home)
+            elif label == "Dashboard":
+                btn.clicked.connect(self.show_dashboard)
             sidebar_layout.addWidget(btn)
 
         # Push everything down
@@ -278,7 +320,7 @@ class DashboardPage(QWidget):
         logout_btn.setCursor(Qt.PointingHandCursor)
         logout_btn.setFixedHeight(40)
         try:
-            logout_icon = qta.icon('fa5s.sign-out-alt', color='#ef4444', scale_factor=0.9)
+            logout_icon = qta.icon("fa5s.sign-out-alt", color="#ef4444", scale_factor=0.9)
             logout_btn.setIcon(logout_icon)
             logout_btn.setIconSize(QSize(16, 16))
         except:
@@ -302,7 +344,9 @@ class DashboardPage(QWidget):
         btn.setFixedHeight(40)
 
         try:
-            icon = qta.icon(icon_name, color='#ffffff' if is_active else '#94a3b8', scale_factor=0.9)
+            icon = qta.icon(
+                icon_name, color="#ffffff" if is_active else "#94a3b8", scale_factor=0.9
+            )
             btn.setIcon(icon)
             btn.setIconSize(QSize(16, 16))
         except:
@@ -420,7 +464,7 @@ class DashboardPage(QWidget):
 
         stats_data = [
             ("Total Services", str(total_services), False),
-            ("Connected Services", str(connected_services), True)
+            ("Connected Services", str(connected_services), True),
         ]
 
         for title, value, is_green in stats_data:
@@ -517,11 +561,11 @@ class DashboardPage(QWidget):
         icon_label = QLabel()
         icon_label.setAlignment(Qt.AlignCenter)
         try:
-            icon = qta.icon(icon_name, color='#475569', scale_factor=1.2)
+            icon = qta.icon(icon_name, color="#475569", scale_factor=1.2)
             pixmap = icon.pixmap(28, 28)
             icon_label.setPixmap(pixmap)
         except Exception as e:
-            print(f"Icon error for {service_name}: {e}")
+            logger.debug("Icon error for %s: %s", service_name, e)
             icon_label.setText("●")
             icon_label.setStyleSheet("color: #475569; font-size: 24px;")
 
@@ -573,7 +617,7 @@ class DashboardPage(QWidget):
         # Get internal service name
         internal_name = self.service_name_map.get(service_display_name, service_display_name)
 
-        print(f"🔌 Connecting to {service_display_name} ({internal_name})...")
+        logger.info("Connecting to %s (%s)...", service_display_name, internal_name)
 
         # Check if service is registered in ServiceManager
         if internal_name not in self.service_manager.list_services():
@@ -581,7 +625,7 @@ class DashboardPage(QWidget):
                 self,
                 "Service Not Available",
                 f"{service_display_name} integration is not yet implemented.\n\n"
-                f"Currently only Google Workspace is supported."
+                f"Currently only Google Workspace is supported.",
             )
             return
 
@@ -589,8 +633,9 @@ class DashboardPage(QWidget):
         progress = QProgressDialog(
             f"Connecting to {service_display_name}...\n\nA browser window will open for authentication.",
             None,  # No cancel button
-            0, 0,  # Indeterminate progress
-            self
+            0,
+            0,  # Indeterminate progress
+            self,
         )
         progress.setWindowTitle("Authenticating")
         progress.setWindowModality(Qt.WindowModal)
@@ -603,56 +648,50 @@ class DashboardPage(QWidget):
             # So we need to re-register the service with user_id
             if internal_name == "GMeet":
                 from services.meet_service import MeetService
-                self.service_manager.register_service(
-                    "GMeet",
-                    MeetService(user_id=self.user_id)
-                )
+
+                self.service_manager.register_service("GMeet", MeetService(user_id=self.user_id))
             elif internal_name == "Spotify":
                 from services.spotify_service import SpotifyService
+
                 self.service_manager.register_service(
-                    "Spotify",
-                    SpotifyService(user_id=self.user_id)
+                    "Spotify", SpotifyService(user_id=self.user_id)
                 )
 
-            future = self.service_manager.connect(internal_name)
-
-            # Wait for result (blocking, but in GUI thread - not ideal but simple)
-            success, message = future.result()
-
-            progress.close()
-
-            if success:
-                print(f"✅ Connected to {service_display_name}: {message}")
-
-                # Update user_context.json
-                self._update_user_context()
-
-                # Show success message
-                QMessageBox.information(
-                    self,
-                    "Connection Successful",
-                    f"Successfully connected to {service_display_name}!\n\n{message}"
-                )
-
-                # Refresh dashboard to show updated status
-                self._refresh_dashboard()
-            else:
-                print(f"❌ Failed to connect to {service_display_name}: {message}")
-                QMessageBox.warning(
-                    self,
-                    "Connection Failed",
-                    f"Failed to connect to {service_display_name}.\n\n{message}"
-                )
+            # Run OAuth in a background QThread — never blocks the Qt event loop
+            self._oauth_thread = OAuthThread(self.service_manager, internal_name)
+            self._oauth_thread.finished.connect(
+                lambda ok, msg: self._on_oauth_done(service_display_name, progress, ok, msg)
+            )
+            self._oauth_thread.start()
+            # Return immediately; _on_oauth_done handles the result when ready
 
         except Exception as e:
             progress.close()
-            print(f"❌ Error connecting to {service_display_name}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Error starting OAuth for %s: %s", service_display_name, e, exc_info=True)
             QMessageBox.critical(
                 self,
                 "Connection Error",
-                f"An error occurred while connecting to {service_display_name}:\n\n{str(e)}"
+                f"An error occurred while connecting to {service_display_name}:\n\n{str(e)}",
+            )
+
+    def _on_oauth_done(self, service_display_name: str, progress, success: bool, message: str):
+        """Called on the Qt main thread when OAuth completes."""
+        progress.close()
+        if success:
+            logger.info("Connected to %s: %s", service_display_name, message)
+            self._update_user_context()
+            QMessageBox.information(
+                self,
+                "Connection Successful",
+                f"Successfully connected to {service_display_name}!\n\n{message}",
+            )
+            self._refresh_dashboard()
+        else:
+            logger.error("Failed to connect to %s: %s", service_display_name, message)
+            QMessageBox.warning(
+                self,
+                "Connection Failed",
+                f"Failed to connect to {service_display_name}.\n\n{message}",
             )
 
     def _handle_disconnect(self, service_display_name):
@@ -667,13 +706,13 @@ class DashboardPage(QWidget):
             f"Are you sure you want to disconnect from {service_display_name}?\n\n"
             f"This will remove your stored credentials.",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.No:
             return
 
-        print(f"🔌 Disconnecting from {service_display_name} ({internal_name})...")
+        logger.info("Disconnecting from %s (%s)...", service_display_name, internal_name)
 
         try:
             # Delete token from MongoDB
@@ -681,7 +720,9 @@ class DashboardPage(QWidget):
                 result = self.token_store.delete_token(internal_name, self.user_id)
                 if result.get("ok"):
                     deleted_count = result.get("deleted_count", 0)
-                    print(f"✅ Deleted {deleted_count} tokens from MongoDB for {service_display_name}")
+                    logger.info(
+                        "Deleted %d tokens from MongoDB for %s", deleted_count, service_display_name
+                    )
 
                     # Also delete the token.json file to force OAuth on reconnect
                     # dashboard.py is at: Sentinel-AI-Frontend/ui/views/dashboard.py
@@ -691,16 +732,18 @@ class DashboardPage(QWidget):
                     frontend_dir = os.path.dirname(ui_dir)  # .../Sentinel-AI-Frontend
                     token_path = os.path.join(frontend_dir, "token.json")
 
-                    print(f"🔍 Looking for token.json at: {token_path}")
+                    logger.debug("Looking for token.json at: %s", token_path)
 
                     if os.path.exists(token_path):
                         try:
                             os.remove(token_path)
-                            print(f"✅ Deleted token.json file at {token_path}")
+                            logger.info("Deleted token.json file at %s", token_path)
                         except Exception as e:
-                            print(f"⚠️ Warning: Could not delete token.json: {e}")
+                            logger.warning("Could not delete token.json: %s", e)
                     else:
-                        print(f"ℹ️ No token.json file found at {token_path} (already deleted or never existed)")
+                        logger.info(
+                            "No token.json file found at %s (already deleted or never existed)", token_path
+                        )
 
                     # Update user_context.json
                     self._update_user_context()
@@ -708,7 +751,7 @@ class DashboardPage(QWidget):
                     QMessageBox.information(
                         self,
                         "Disconnected",
-                        f"Successfully disconnected from {service_display_name}."
+                        f"Successfully disconnected from {service_display_name}.",
                     )
 
                     # Refresh dashboard
@@ -718,91 +761,130 @@ class DashboardPage(QWidget):
                     QMessageBox.warning(
                         self,
                         "Disconnect Failed",
-                        f"Failed to disconnect from {service_display_name}:\n\n{error}"
+                        f"Failed to disconnect from {service_display_name}:\n\n{error}",
                     )
             else:
-                QMessageBox.warning(
-                    self,
-                    "Error",
-                    "User ID not available. Cannot disconnect."
-                )
+                QMessageBox.warning(self, "Error", "User ID not available. Cannot disconnect.")
 
         except Exception as e:
-            print(f"❌ Error disconnecting from {service_display_name}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Error disconnecting from %s: %s", service_display_name, e, exc_info=True)
             QMessageBox.critical(
-                self,
-                "Disconnect Error",
-                f"An error occurred while disconnecting:\n\n{str(e)}"
+                self, "Disconnect Error", f"An error occurred while disconnecting:\n\n{str(e)}"
             )
 
+    # ---- Status-map shared by both signal and polling paths ----
+    _STATUS_MAP = None  # Lazily populated to avoid import at class-body time
+
+    @classmethod
+    def _get_status_map(cls):
+        if cls._STATUS_MAP is None:
+            try:
+                from integration.event_bus import BackendStatus
+            except ImportError:
+                from event_bus import BackendStatus  # type: ignore
+            cls._STATUS_MAP = {
+                BackendStatus.STARTING: ("Starting...", "#f59e0b"),
+                BackendStatus.READY: ("Ready", "#10b981"),
+                BackendStatus.LISTENING: ("Listening for 'Sentinel'", "#10b981"),
+                BackendStatus.WAKE_WORD_DETECTED: ("Wake word detected!", "#8b5cf6"),
+                BackendStatus.PROCESSING: ("Processing...", "#3b82f6"),
+                BackendStatus.SPEAKING: ("Speaking...", "#06b6d4"),
+                BackendStatus.ERROR: ("Error", "#ef4444"),
+                BackendStatus.STOPPED: ("Stopped", "#6b7280"),
+            }
+        return cls._STATUS_MAP
+
+    def _apply_status(self, text, color):
+        """Apply a status string + color to the badge widget."""
+        self.backend_status = text
+        self.backend_color = color
+        self.status_badge.setText(f"● {text}")
+        self.status_badge.setStyleSheet(
+            f"background-color: {color}20; color: {color};"
+            "border-radius: 20px; padding: 6px 14px; font-size: 12px; font-weight: 500;"
+        )
+
+    def _handle_event(self, event):
+        """Slot connected to QtEventBridge.event_received (instant delivery)."""
+        try:
+            from integration.event_bus import EventType
+        except ImportError:
+            from event_bus import EventType  # type: ignore
+
+        try:
+            status_map = self._get_status_map()
+            if event.status and event.status in status_map:
+                self._apply_status(*status_map[event.status])
+            elif event.type == EventType.COMMAND_RECEIVED:
+                self._apply_status(f"Command: {event.data or 'processing'}", "#3b82f6")
+        except Exception as e:
+            logger.warning("Error handling backend event: %s", e)
+
     def update_backend_status(self):
-        """Update backend status from event bus"""
+        """Fallback polling path — only used when Qt signal bridge is unavailable."""
         if not self.event_bus:
             return
 
         try:
-            # Import event types (already imported during init, but needed for type checking)
-            try:
-                from integration.event_bus import EventType, BackendStatus
-            except ImportError:
-                from event_bus import EventType, BackendStatus  # type: ignore
-
-            # Check for events from backend
             event = self.event_bus.get_event()
             if not event:
+                self._idle_poll_count += 1
+                if self._idle_poll_count >= self._max_idle_polls:
+                    self.backend_status_timer.setInterval(1000)
                 return
 
-            # Update status based on event and backend status
-            if event.status:
-                status_map = {
-                    BackendStatus.STARTING: ("Starting...", "#f59e0b"),  # Orange
-                    BackendStatus.READY: ("Ready", "#10b981"),  # Green
-                    BackendStatus.LISTENING: ("Listening for 'Sentinel'", "#10b981"),  # Green
-                    BackendStatus.WAKE_WORD_DETECTED: ("Wake word detected!", "#8b5cf6"),  # Purple
-                    BackendStatus.PROCESSING: ("Processing...", "#3b82f6"),  # Blue
-                    BackendStatus.SPEAKING: ("Speaking...", "#06b6d4"),  # Cyan
-                    BackendStatus.ERROR: ("Error", "#ef4444"),  # Red
-                    BackendStatus.STOPPED: ("Stopped", "#6b7280"),  # Gray
-                }
-
-                if event.status in status_map:
-                    self.backend_status, self.backend_color = status_map[event.status]
-                    self.status_badge.setText(f"● {self.backend_status}")
-                    self.status_badge.setStyleSheet(f"""
-                        background-color: {self.backend_color}20;
-                        color: {self.backend_color};
-                        border-radius: 20px;
-                        padding: 6px 14px;
-                        font-size: 12px;
-                        font-weight: 500;
-                    """)
-
-            # Handle specific event types for additional context
-            elif event.type == EventType.COMMAND_RECEIVED:
-                self.backend_status = f"Command: {event.data or 'processing'}"
-                self.backend_color = "#3b82f6"  # Blue
-                self.status_badge.setText(f"● {self.backend_status}")
-                self.status_badge.setStyleSheet(f"""
-                    background-color: {self.backend_color}20;
-                    color: {self.backend_color};
-                    border-radius: 20px;
-                    padding: 6px 14px;
-                    font-size: 12px;
-                    font-weight: 500;
-                """)
+            self._idle_poll_count = 0
+            self.backend_status_timer.setInterval(100)
+            self._handle_event(event)
 
         except Exception as e:
-            print(f"⚠️ Error updating backend status: {e}")
+            logger.warning("Error updating backend status: %s", e)
 
     def logout_user(self):
         """Handle user logout"""
-        # Stop backend status timer if active
-        if hasattr(self, 'backend_status_timer'):
+        # Disconnect Qt signal bridge if active
+        if hasattr(self, "_qt_bridge") and self._qt_bridge is not None:
+            try:
+                self._qt_bridge.event_received.disconnect(self._handle_event)
+            except (TypeError, RuntimeError):
+                pass
+            if self.event_bus:
+                self.event_bus.set_qt_bridge(None)
+            self._qt_bridge = None
+
+        # Stop fallback polling timer if active
+        if hasattr(self, "backend_status_timer"):
             self.backend_status_timer.stop()
 
         if self.username:
             SessionManager.delete_session(self.username)
         if self.main_app:
             self.main_app.show_login()
+
+    def show_settings(self):
+        """Navigate to settings page"""
+        # Disconnect Qt signal bridge and stop timer
+        if hasattr(self, "_qt_bridge") and self._qt_bridge is not None:
+            try:
+                self._qt_bridge.event_received.disconnect(self._handle_event)
+            except (TypeError, RuntimeError):
+                pass
+            if self.event_bus:
+                self.event_bus.set_qt_bridge(None)
+            self._qt_bridge = None
+        if hasattr(self, "backend_status_timer"):
+            self.backend_status_timer.stop()
+
+        if self.main_app:
+            self.main_app.show_settings(username=self.username, user_id=self.user_id)
+
+    def show_home(self):
+        """Navigate to home (same as dashboard)"""
+        # This is currently the same as dashboard
+        # Can be expanded to show a different home view in the future
+        pass
+
+    def show_dashboard(self):
+        """Refresh dashboard view"""
+        # Currently on dashboard, can be used to refresh
+        self._refresh_dashboard()

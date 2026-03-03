@@ -35,7 +35,7 @@ class ModernButton(QPushButton):
             self.setEnabled(True)
 
             # Stop animation
-            if hasattr(self, '_pulse_timer'):
+            if hasattr(self, "_pulse_timer"):
                 self._pulse_timer.stop()
 
     def _pulse_opacity(self):
@@ -116,8 +116,8 @@ class GradientButton(QPushButton):
     @staticmethod
     def _lighten_color(hex_color, factor=0.1):
         """Lighten a hex color"""
-        hex_color = hex_color.lstrip('#')
-        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        hex_color = hex_color.lstrip("#")
+        r, g, b = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
 
         r = min(255, int(r + (255 - r) * factor))
         g = min(255, int(g + (255 - g) * factor))
@@ -128,8 +128,8 @@ class GradientButton(QPushButton):
     @staticmethod
     def _darken_color(hex_color, factor=0.2):
         """Darken a hex color"""
-        hex_color = hex_color.lstrip('#')
-        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        hex_color = hex_color.lstrip("#")
+        r, g, b = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
 
         r = max(0, int(r * (1 - factor)))
         g = max(0, int(g * (1 - factor)))
