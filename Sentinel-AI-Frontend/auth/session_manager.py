@@ -1,5 +1,6 @@
 from .keyring_auth import KeyringAuthFixed
 
+
 class SessionManager:
     @staticmethod
     def save_session(username: str, token: str):

@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+include = ["dev_tasks.py"]
+
+[project]
+name = "sentinel-ai-desktop"
+version = "0.1.0"
+description = "Sentinel AI Desktop launcher + backend + frontend"
+requires-python = ">=3.11,<3.14"
+dependencies = []
+
+[dependency-groups]
+backend = [
+    "langchain==0.3.26",
+    "langchain-community==0.3.27",
+    "langchain-core==0.3.68",
+    "langchain-openai==0.3.27",
+    "langchain-ollama==0.3.4",
+    "langgraph==0.4.3",
+    "langgraph-prebuilt==0.1.8",
+    "langgraph-checkpoint==2.0.25",
+    "langsmith==0.4.46",
+    "PyAudio==0.2.14",
+    "SpeechRecognition==3.14.2",
+    "pvporcupine==3.0.2",
+    "elevenlabs==2.23.0",
+    "pygame==2.6.1",
+    "spotipy==2.25.1",
+    "playwright==1.56.0",
+    "lyricsgenius==3.7.5",
+    "google-auth==2.40.2",
+    "google-auth-oauthlib==1.2.1",
+    "google-api-python-client==2.154.0",
+    "pymongo==4.10.1",
+    "dnspython==2.7.0",
+    "requests==2.32.3",
+    "beautifulsoup4==4.13.4",
+    "pycaw==20240210",
+    "comtypes==1.4.8",
+    "screen-brightness-control==0.23.0",
+    "psutil==6.1.1",
+    "pyautogui==0.9.54",
+    "Pillow==11.0.0",
+    "python-dotenv==1.1.0",
+    "IPython==9.2.0",
+]
+dev = [
+    "pyright>=1.1.408",
+    "ruff>=0.15.4",
+]
+
+frontend = [
+    "PyQt5==5.15.11",
+    "PyQt5-Qt5==5.15.2",
+    "PyQt5_sip==12.17.0",
+    "QtAwesome>=1.2.0",
+    "keyring>=24.0.0",
+    "bcrypt>=4.0.0",
+    "pymongo>=4.0.0",
+    "dnspython>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=0.4.0",
+    "google-api-python-client>=2.0.0",
+    "cryptography>=40.0.0",
+]
+
+[project.scripts]
+lint = "dev_tasks:lint"
+format = "dev_tasks:format"
+typecheck = "dev_tasks:typecheck"
+
+[tool.uv]
+package = true
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.ruff.format]
+# Ruff formatter is the sole formatter — no black, no isort

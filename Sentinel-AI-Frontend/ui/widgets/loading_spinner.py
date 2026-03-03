@@ -36,10 +36,10 @@ class LoadingSpinner(QWidget):
 
         # Create gradient
         gradient = QConicalGradient(self.size / 2, self.size / 2, self.angle)
-        gradient.setColorAt(0, QColor(self.color.red(), self.color.green(),
-                                      self.color.blue(), 0))
-        gradient.setColorAt(0.5, QColor(self.color.red(), self.color.green(),
-                                       self.color.blue(), 200))
+        gradient.setColorAt(0, QColor(self.color.red(), self.color.green(), self.color.blue(), 0))
+        gradient.setColorAt(
+            0.5, QColor(self.color.red(), self.color.green(), self.color.blue(), 200)
+        )
         gradient.setColorAt(1, self.color)
 
         # Draw spinning arc

@@ -1,13 +1,26 @@
+import logging
+import re
+import os
+
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
-    QHBoxLayout, QFrame, QMessageBox, QCheckBox, QAction, QGraphicsDropShadowEffect
+    QWidget,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame,
+    QMessageBox,
+    QCheckBox,
+    QAction,
+    QGraphicsDropShadowEffect,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap, QColor, QPainter
 from PyQt5.QtSvg import QSvgWidget
 import qtawesome as qta
-import re
-import os
+
+logger = logging.getLogger(__name__)
 
 # Import authentication and database managers
 from auth.keyring_auth import KeyringAuthFixed
@@ -17,6 +30,7 @@ from database.user_service import UserService
 # Helper class to make labels clickable
 class ClickableLabel(QLabel):
     clicked = pyqtSignal()
+
     def mousePressEvent(self, event):
         self.clicked.emit()
         super().mousePressEvent(event)
@@ -27,7 +41,7 @@ class CheckBoxWithIcon(QCheckBox):
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
         try:
-            self.check_icon = qta.icon('fa5s.check', color='white', scale_factor=0.65)
+            self.check_icon = qta.icon("fa5s.check", color="white", scale_factor=0.65)
         except:
             self.check_icon = None
 
@@ -78,10 +92,12 @@ class SignupPage(QWidget):
         icon_path = os.path.join(os.path.dirname(__file__), "..", "assests", "icon.png")
         if os.path.exists(icon_path):
             icon_pixmap = QPixmap(icon_path)
-            scaled_pixmap = icon_pixmap.scaled(250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = icon_pixmap.scaled(
+                250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
             icon_label.setPixmap(scaled_pixmap)
         else:
-            print(f"Icon not found at: {icon_path}")
+            logger.warning("Icon not found at: %s", icon_path)
 
         # Card Header
         self.card_title = QLabel("Create Account")
@@ -104,11 +120,11 @@ class SignupPage(QWidget):
         self.fullname_input.setTextMargins(5, 0, 0, 0)
 
         try:
-            user_icon = qta.icon('fa5s.user', color='#64748b', scale_factor=0.9)
+            user_icon = qta.icon("fa5s.user", color="#64748b", scale_factor=0.9)
             user_action = QAction(user_icon, "", self.fullname_input)
             self.fullname_input.addAction(user_action, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"User icon error: {e}")
+            logger.debug("User icon error: %s", e)
 
         self.fullname_hint = QLabel("")
         self.fullname_hint.setObjectName("validationHint")
@@ -125,11 +141,11 @@ class SignupPage(QWidget):
         self.username_input.setTextMargins(5, 0, 0, 0)
 
         try:
-            user_icon2 = qta.icon('fa5s.user-circle', color='#64748b', scale_factor=0.9)
+            user_icon2 = qta.icon("fa5s.user-circle", color="#64748b", scale_factor=0.9)
             user_action2 = QAction(user_icon2, "", self.username_input)
             self.username_input.addAction(user_action2, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"User icon error: {e}")
+            logger.debug("User icon error: %s", e)
 
         self.username_hint = QLabel("")
         self.username_hint.setObjectName("validationHint")
@@ -146,11 +162,11 @@ class SignupPage(QWidget):
         self.phone_input.setTextMargins(5, 0, 0, 0)
 
         try:
-            phone_icon = qta.icon('fa5s.phone', color='#64748b', scale_factor=0.9)
+            phone_icon = qta.icon("fa5s.phone", color="#64748b", scale_factor=0.9)
             phone_action = QAction(phone_icon, "", self.phone_input)
             self.phone_input.addAction(phone_action, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"Phone icon error: {e}")
+            logger.debug("Phone icon error: %s", e)
 
         self.phone_hint = QLabel("")
         self.phone_hint.setObjectName("validationHint")
@@ -167,11 +183,11 @@ class SignupPage(QWidget):
         self.email_input.setTextMargins(5, 0, 0, 0)
 
         try:
-            email_icon = qta.icon('fa5s.envelope', color='#64748b', scale_factor=0.9)
+            email_icon = qta.icon("fa5s.envelope", color="#64748b", scale_factor=0.9)
             email_action = QAction(email_icon, "", self.email_input)
             self.email_input.addAction(email_action, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"Email icon error: {e}")
+            logger.debug("Email icon error: %s", e)
 
         self.email_hint = QLabel("")
         self.email_hint.setObjectName("validationHint")
@@ -183,27 +199,27 @@ class SignupPage(QWidget):
 
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setPlaceholderText("Create a password (min. 6 characters)")
+        self.password_input.setPlaceholderText("Create a password (min. 8 chars, upper/lower/digit/special)")
         self.password_input.setFixedHeight(46)
         self.password_input.setObjectName("passwordInput")
         self.password_input.setTextMargins(5, 0, 0, 0)
 
         try:
-            lock_icon = qta.icon('fa5s.lock', color='#64748b', scale_factor=0.9)
+            lock_icon = qta.icon("fa5s.lock", color="#64748b", scale_factor=0.9)
             lock_action = QAction(lock_icon, "", self.password_input)
             self.password_input.addAction(lock_action, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"Lock icon error: {e}")
+            logger.debug("Lock icon error: %s", e)
 
         # Add eye icon for password visibility toggle
         try:
-            self.eye_icon = qta.icon('fa5s.eye', color='#64748b', scale_factor=0.9)
-            self.eye_off_icon = qta.icon('fa5s.eye-slash', color='#64748b', scale_factor=0.9)
+            self.eye_icon = qta.icon("fa5s.eye", color="#64748b", scale_factor=0.9)
+            self.eye_off_icon = qta.icon("fa5s.eye-slash", color="#64748b", scale_factor=0.9)
             self.eye_action = QAction(self.eye_icon, "", self.password_input)
             self.eye_action.triggered.connect(self.toggle_password_visibility)
             self.password_input.addAction(self.eye_action, QLineEdit.TrailingPosition)
         except Exception as e:
-            print(f"Eye icon error: {e}")
+            logger.debug("Eye icon error: %s", e)
 
         self.password_hint = QLabel("")
         self.password_hint.setObjectName("validationHint")
@@ -221,19 +237,21 @@ class SignupPage(QWidget):
         self.confirm_password_input.setTextMargins(5, 0, 0, 0)
 
         try:
-            lock_icon2 = qta.icon('fa5s.lock', color='#64748b', scale_factor=0.9)
+            lock_icon2 = qta.icon("fa5s.lock", color="#64748b", scale_factor=0.9)
             lock_action2 = QAction(lock_icon2, "", self.confirm_password_input)
             self.confirm_password_input.addAction(lock_action2, QLineEdit.LeadingPosition)
         except Exception as e:
-            print(f"Lock icon error: {e}")
+            logger.debug("Lock icon error: %s", e)
 
         # Add eye icon for confirm password visibility toggle
         try:
             self.confirm_eye_action = QAction(self.eye_icon, "", self.confirm_password_input)
             self.confirm_eye_action.triggered.connect(self.toggle_confirm_password_visibility)
-            self.confirm_password_input.addAction(self.confirm_eye_action, QLineEdit.TrailingPosition)
+            self.confirm_password_input.addAction(
+                self.confirm_eye_action, QLineEdit.TrailingPosition
+            )
         except Exception as e:
-            print(f"Eye icon error: {e}")
+            logger.debug("Eye icon error: %s", e)
 
         self.confirm_password_hint = QLabel("")
         self.confirm_password_hint.setObjectName("validationHint")
@@ -366,7 +384,7 @@ class SignupPage(QWidget):
                 self.password_visible = True
                 self.eye_action.setIcon(self.eye_off_icon)
         except Exception as e:
-            print(f"Toggle visibility error: {e}")
+            logger.debug("Toggle visibility error: %s", e)
 
     def toggle_confirm_password_visibility(self):
         """Toggle confirm password visibility on eye icon click"""
@@ -380,7 +398,7 @@ class SignupPage(QWidget):
                 self.confirm_password_visible = True
                 self.confirm_eye_action.setIcon(self.eye_off_icon)
         except Exception as e:
-            print(f"Toggle visibility error: {e}")
+            logger.debug("Toggle visibility error: %s", e)
 
     def show_validation_hint(self, field, message, is_error=True):
         """Show validation hint below input field"""
@@ -390,15 +408,14 @@ class SignupPage(QWidget):
             "phone": self.phone_hint,
             "email": self.email_hint,
             "password": self.password_hint,
-            "confirm_password": self.confirm_password_hint
+            "confirm_password": self.confirm_password_hint,
         }
 
         hint_label = hints.get(field)
         if hint_label:
             hint_label.setText(message)
             hint_label.setStyleSheet(
-                f"color: {'#ef4444' if is_error else '#22c55e'}; "
-                f"font-size: 12px; margin-top: 4px;"
+                f"color: {'#ef4444' if is_error else '#22c55e'}; font-size: 12px; margin-top: 4px;"
             )
             hint_label.show()
 
@@ -454,9 +471,10 @@ class SignupPage(QWidget):
             self.password_input.setFocus()
             return
 
-        # Check password length
-        if len(password) < 6:
-            self.show_validation_hint("password", "⚠ Password must be at least 6 characters")
+        # Validate password complexity
+        pw_valid, pw_message = KeyringAuthFixed._validate_password(password)
+        if not pw_valid:
+            self.show_validation_hint("password", f"⚠ {pw_message}")
             self.password_input.setFocus()
             return
 
@@ -484,7 +502,9 @@ class SignupPage(QWidget):
 
         try:
             # Register with KeyringAuth (local storage)
-            success, message = KeyringAuthFixed.register_user(username, fullname, phone, email, password)
+            success, message = KeyringAuthFixed.register_user(
+                username, fullname, phone, email, password
+            )
 
             if not success:
                 self.show_validation_hint("username", f"⚠ {message}")
@@ -493,12 +513,14 @@ class SignupPage(QWidget):
 
             # Save to MongoDB Atlas
             user_service = UserService()
-            mongo_success, mongo_message = user_service.save_user(username, fullname, phone, email, password)
+            mongo_success, mongo_message = user_service.save_user(
+                username, fullname, phone, email, password
+            )
 
             if not mongo_success:
-                print(f"⚠️ Database Warning: {mongo_message}")
+                logger.warning("Database warning: %s", mongo_message)
             else:
-                print(f"✅ User saved to MongoDB: {mongo_message}")
+                logger.info("User saved to MongoDB: %s", mongo_message)
 
             # Show success feedback
             self.signup_btn.setText("✓ Account created!")
@@ -509,18 +531,16 @@ class SignupPage(QWidget):
                 }
             """)
 
-            QMessageBox.information(self, "Success", "Account created successfully! Please sign in.")
+            QMessageBox.information(
+                self, "Success", "Account created successfully! Please sign in."
+            )
 
             # Redirect to login
             if self.switch_to_login:
                 self.switch_to_login()
 
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"An error occurred during signup: {str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"An error occurred during signup: {str(e)}")
             self.reset_signup_button()
 
     def reset_signup_button(self):

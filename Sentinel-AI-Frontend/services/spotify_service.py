@@ -1,6 +1,5 @@
-from __future__ import print_function
-
 import os
+import secrets
 import traceback
 import logging
 import json
@@ -18,12 +17,12 @@ log = logging.getLogger(__name__)
 # Spotify OAuth configuration
 # If modifying these scopes, delete the cached token from MongoDB
 SPOTIFY_SCOPES = [
-    'user-modify-playback-state',
-    'user-read-playback-state',
-    'user-read-currently-playing',
-    'playlist-read-private',
-    'playlist-read-collaborative',
-    'user-library-read'
+    "user-modify-playback-state",
+    "user-read-playback-state",
+    "user-read-currently-playing",
+    "playlist-read-private",
+    "playlist-read-collaborative",
+    "user-library-read",
 ]
 
 
@@ -46,12 +45,14 @@ class SpotifyService:
 
         load_dotenv(env_path)
 
-        self.client_id = client_id or os.getenv('SPOTIPY_CLIENT_ID')
-        self.client_secret = client_secret or os.getenv('SPOTIPY_CLIENT_SECRET')
-        self.redirect_uri = redirect_uri or os.getenv('SPOTIPY_REDIRECT_URI') or 'http://localhost:8888/callback'
+        self.client_id = client_id or os.getenv("SPOTIPY_CLIENT_ID")
+        self.client_secret = client_secret or os.getenv("SPOTIPY_CLIENT_SECRET")
+        self.redirect_uri = (
+            redirect_uri or os.getenv("SPOTIPY_REDIRECT_URI") or "http://localhost:8888/callback"
+        )
 
         self.user_id = user_id
-        self.scope = ' '.join(SPOTIFY_SCOPES)
+        self.scope = " ".join(SPOTIFY_SCOPES)
 
         # Token storage helper
         self._token_store = TokenStore()
@@ -80,9 +81,9 @@ class SpotifyService:
                 log.error(msg)
                 return False, msg
 
-            print(f"🎵 Starting Spotify OAuth flow...")
-            print(f"   Client ID: {self.client_id[:20]}...")
-            print(f"   Redirect URI: {self.redirect_uri}")
+            log.info("Starting Spotify OAuth flow...")
+            log.info("   Client ID: %s...", self.client_id[:20])
+            log.info("   Redirect URI: %s", self.redirect_uri)
 
             # Check if valid token already exists
             if self.user_id:
@@ -102,9 +103,12 @@ class SpotifyService:
             # Start OAuth flow
             log.info("Starting Spotify OAuth flow...")
 
+            # Generate CSRF state token to prevent cross-site request forgery
+            self._csrf_state = secrets.token_urlsafe(32)
+
             # Parse redirect URI to get host and port
             parsed_uri = urlparse(self.redirect_uri)
-            host = parsed_uri.hostname or 'localhost'
+            host = parsed_uri.hostname or "localhost"
             port = parsed_uri.port or 8888
 
             # Start local server to receive callback
@@ -157,11 +161,12 @@ class SpotifyService:
         from urllib.parse import urlencode
 
         params = {
-            'client_id': self.client_id,
-            'response_type': 'code',
-            'redirect_uri': self.redirect_uri,
-            'scope': self.scope,
-            'show_dialog': 'true'  # Always show account selection dialog
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+            "scope": self.scope,
+            "state": self._csrf_state,
+            "show_dialog": "true",  # Always show account selection dialog
         }
 
         return f"https://accounts.spotify.com/authorize?{urlencode(params)}"
@@ -177,16 +182,29 @@ class SpotifyService:
                 query_params = parse_qs(parsed_path.query)
 
                 log.info(f"Received callback: {self.path}")
-                print(f"🔔 Spotify callback received: {self.path}")
+                log.info("Spotify callback received: %s", self.path)
 
-                if 'code' in query_params:
-                    service._auth_code = query_params['code'][0]
+                # Validate CSRF state before processing any response
+                received_state = query_params.get("state", [None])[0]
+                if received_state != service._csrf_state:
+                    service._auth_error = "CSRF state mismatch — callback may be forged."
+                    log.error(f"CSRF state validation failed (expected != received)")
+                    self.send_response(400)
+                    self.send_header("Content-type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(
+                        b"<html><body><h1>Authorization Failed</h1><p>Invalid state parameter. Please try again.</p></body></html>"
+                    )
+                    return
+
+                if "code" in query_params:
+                    service._auth_code = query_params["code"][0]
                     log.info(f"Authorization code received: {service._auth_code[:20]}...")
-                    print(f"✅ Authorization code received!")
+                    log.info("Authorization code received")
 
                     # Send success response
                     self.send_response(200)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
+                    self.send_header("Content-type", "text/html; charset=utf-8")
                     self.end_headers()
                     success_html = """
                         <html>
@@ -208,15 +226,15 @@ class SpotifyService:
                         </body>
                         </html>
                     """
-                    self.wfile.write(success_html.encode('utf-8'))
-                elif 'error' in query_params:
-                    service._auth_error = query_params['error'][0]
+                    self.wfile.write(success_html.encode("utf-8"))
+                elif "error" in query_params:
+                    service._auth_error = query_params["error"][0]
                     log.error(f"Authorization error: {service._auth_error}")
-                    print(f"❌ Authorization error: {service._auth_error}")
+                    log.error("Authorization error: %s", service._auth_error)
 
                     # Send error response
                     self.send_response(400)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
+                    self.send_header("Content-type", "text/html; charset=utf-8")
                     self.end_headers()
                     error_html = f"""
                         <html>
@@ -235,12 +253,12 @@ class SpotifyService:
                         </body>
                         </html>
                     """
-                    self.wfile.write(error_html.encode('utf-8'))
+                    self.wfile.write(error_html.encode("utf-8"))
                 else:
                     # Unknown callback
                     log.warning(f"Unknown callback received: {self.path}")
                     self.send_response(400)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
+                    self.send_header("Content-type", "text/html; charset=utf-8")
                     self.end_headers()
                     invalid_html = """
                         <html>
@@ -250,7 +268,7 @@ class SpotifyService:
                         </body>
                         </html>
                     """
-                    self.wfile.write(invalid_html.encode('utf-8'))
+                    self.wfile.write(invalid_html.encode("utf-8"))
 
             def log_message(self, format, *args):
                 # Log to our logger instead of stderr
@@ -258,7 +276,7 @@ class SpotifyService:
 
         try:
             # Bind to 0.0.0.0 to listen on all interfaces (accepts both localhost and 127.0.0.1)
-            self._server = HTTPServer(('0.0.0.0', port), CallbackHandler)
+            self._server = HTTPServer(("0.0.0.0", port), CallbackHandler)
             # Run server in background thread
             server_thread = Thread(target=self._server.serve_forever, daemon=True)
             server_thread.start()
@@ -266,12 +284,14 @@ class SpotifyService:
             # Give server a moment to start
             time.sleep(0.5)
 
-            log.info(f"Local server started on 0.0.0.0:{port} (accessible via localhost:{port} or 127.0.0.1:{port})")
-            print(f"🌐 Local callback server started on port {port}")
-            print(f"   Accessible at: http://localhost:{port} and http://127.0.0.1:{port}")
+            log.info(
+                f"Local server started on 0.0.0.0:{port} (accessible via localhost:{port} or 127.0.0.1:{port})"
+            )
+            log.info("Local callback server started on port %s", port)
+            log.info("   Accessible at: http://localhost:%s and http://127.0.0.1:%s", port, port)
         except Exception as e:
             log.error(f"Failed to start local server: {e}")
-            print(f"❌ Failed to start local server: {e}")
+            log.error("Failed to start local server: %s", e)
             raise
 
     def _stop_local_server(self):
@@ -290,11 +310,11 @@ class SpotifyService:
         token_url = "https://accounts.spotify.com/api/token"
 
         data = {
-            'grant_type': 'authorization_code',
-            'code': auth_code,
-            'redirect_uri': self.redirect_uri,
-            'client_id': self.client_id,
-            'client_secret': self.client_secret
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "redirect_uri": self.redirect_uri,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
         }
 
         try:
@@ -303,7 +323,7 @@ class SpotifyService:
             token_info = response.json()
 
             # Add expires_at timestamp
-            token_info['expires_at'] = int(time.time()) + token_info.get('expires_in', 3600)
+            token_info["expires_at"] = int(time.time()) + token_info.get("expires_in", 3600)
 
             log.info("Successfully obtained Spotify access token")
             return token_info
@@ -316,17 +336,17 @@ class SpotifyService:
         """Refresh an expired Spotify token."""
         import requests
 
-        refresh_token = token_data.get('refresh_token')
+        refresh_token = token_data.get("refresh_token")
         if not refresh_token:
             return False, "No refresh token available. Please reconnect."
 
         token_url = "https://accounts.spotify.com/api/token"
 
         data = {
-            'grant_type': 'refresh_token',
-            'refresh_token': refresh_token,
-            'client_id': self.client_id,
-            'client_secret': self.client_secret
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
         }
 
         try:
@@ -335,11 +355,11 @@ class SpotifyService:
             new_token_info = response.json()
 
             # Add expires_at timestamp
-            new_token_info['expires_at'] = int(time.time()) + new_token_info.get('expires_in', 3600)
+            new_token_info["expires_at"] = int(time.time()) + new_token_info.get("expires_in", 3600)
 
             # Preserve refresh token if not provided in response
-            if 'refresh_token' not in new_token_info:
-                new_token_info['refresh_token'] = refresh_token
+            if "refresh_token" not in new_token_info:
+                new_token_info["refresh_token"] = refresh_token
 
             # Save refreshed token
             self._save_token(new_token_info)
@@ -364,6 +384,6 @@ class SpotifyService:
 
     def _is_token_expired(self, token_data):
         """Check if token is expired."""
-        expires_at = token_data.get('expires_at', 0)
+        expires_at = token_data.get("expires_at", 0)
         # Add 60 second buffer
         return int(time.time()) >= (expires_at - 60)

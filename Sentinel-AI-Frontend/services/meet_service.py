@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import os
 import traceback
 import logging
@@ -16,8 +14,8 @@ log = logging.getLogger(__name__)
 # If modifying these scopes, delete the file token.json.
 # IMPORTANT: Must match backend meeting_tools.py scopes!
 SCOPES = [
-    'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/calendar.events'
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events",
 ]
 
 
@@ -28,13 +26,25 @@ class MeetService:
     return a short message suitable for the UI: (bool, message).
     """
 
-    def __init__(self, credentials_path='credentials.json', token_path='token.json', scopes=None, user_id=None):
+    def __init__(
+        self,
+        credentials_path="credentials.json",
+        token_path="token.json",
+        scopes=None,
+        user_id=None,
+    ):
         # Get the Frontend directory path
         frontend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         # Make paths absolute relative to Frontend directory
-        self.credentials_path = os.path.join(frontend_dir, credentials_path) if not os.path.isabs(credentials_path) else credentials_path
-        self.token_path = os.path.join(frontend_dir, token_path) if not os.path.isabs(token_path) else token_path
+        self.credentials_path = (
+            os.path.join(frontend_dir, credentials_path)
+            if not os.path.isabs(credentials_path)
+            else credentials_path
+        )
+        self.token_path = (
+            os.path.join(frontend_dir, token_path) if not os.path.isabs(token_path) else token_path
+        )
 
         self.scopes = scopes or SCOPES
         self.user_id = user_id  # Store user_id for linking tokens
@@ -49,7 +59,9 @@ class MeetService:
             creds_path = os.path.abspath(self.credentials_path)
             token_path = os.path.abspath(self.token_path)
 
-            log.debug("MeetService.connect: credentials_path=%s token_path=%s", creds_path, token_path)
+            log.debug(
+                "MeetService.connect: credentials_path=%s token_path=%s", creds_path, token_path
+            )
 
             if os.path.exists(token_path):
                 try:
@@ -68,7 +80,7 @@ class MeetService:
                 if creds and creds.expired and creds.refresh_token:
                     try:
                         creds.refresh(Request())
-                        with open(token_path, 'w') as token:
+                        with open(token_path, "w") as token:
                             token.write(creds.to_json())
                         # save token to DB
                         try:
@@ -83,11 +95,13 @@ class MeetService:
                         return False, f"Failed to refresh token: {exc}\n{tb}"
                 # run full auth flow
                 if not os.path.exists(creds_path):
-                    msg = (f"Missing OAuth client secrets file.\n\n"
-                           f"Expected location: {creds_path}\n\n"
-                           f"Please:\n"
-                           f"1. Download credentials.json from Google Cloud Console\n"
-                           f"2. Place it in: Sentinel-AI-Frontend/credentials.json")
+                    msg = (
+                        f"Missing OAuth client secrets file.\n\n"
+                        f"Expected location: {creds_path}\n\n"
+                        f"Please:\n"
+                        f"1. Download credentials.json from Google Cloud Console\n"
+                        f"2. Place it in: Sentinel-AI-Frontend/credentials.json"
+                    )
                     log.error(msg)
                     return False, msg
 
@@ -95,7 +109,7 @@ class MeetService:
                     flow = InstalledAppFlow.from_client_secrets_file(creds_path, self.scopes)
                     # explicit open_browser=True, port defaults to 0 (random free port)
                     creds = flow.run_local_server(port=0, open_browser=True)
-                    with open(token_path, 'w') as token:
+                    with open(token_path, "w") as token:
                         token.write(creds.to_json())
                     # save token to DB
                     try:
