@@ -1,40 +1,32 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- `launcher.py`: unified entry point that starts backend + frontend together.
-- `integration/`: thread-safe bridge (event bus, backend runner, status widget); keep cross-component orchestration here.
-- `Sentinel-AI-Backend/`: voice assistant + LangGraph agents.
-- `Sentinel-AI-Backend/src/tools/`: tool implementations (browser, music, meeting, system, productivity).
-- `Sentinel-AI-Frontend/`: PyQt5 desktop UI.
-- `Sentinel-AI-Frontend/ui/views/`: screens (`login_page.py`, `signup_page.py`, `dashboard.py`, `settings_page.py`).
-- `Sentinel-AI-Frontend/devTest/` and root `test_threading.py`: utility test scripts.
+## Project Structure
+
+- `sentinel_core/` — async Python service (FastAPI + LangGraph): LLM providers, agents/tools, voice pipeline, SQLite storage.
+- `app/` — Tauri 2 + React + TypeScript desktop app (WebSocket/REST client of the core).
+- `mcp-windows/` — standalone Windows system-control MCP server (own uv project).
+- `packaging/` — PyInstaller specs and installer build steps (`packaging/README.md`).
+- `docs/` — historical design docs from the pre-rebuild prototype.
 
 ## Build, Test, and Development Commands
-- `python setup_launcher.py`: install backend/frontend dependencies.
-- `python launcher.py`: run the integrated desktop app (recommended flow).
-- `cd Sentinel-AI-Backend; python main.py`: run backend only.
-- `cd Sentinel-AI-Frontend; python main.py`: run frontend only.
-- `python test_threading.py`: quick threading/event sanity check.
-- `cd Sentinel-AI-Frontend; python devTest/test_atlas_connection.py`: verify MongoDB Atlas connectivity.
 
-## Coding Style & Naming Conventions
-- Use Python with 4-space indentation and PEP 8 spacing.
-- Prefer `snake_case` for functions/modules, `PascalCase` for classes, and `UPPER_SNAKE_CASE` for constants/env keys.
-- Keep component boundaries clear: avoid backend/frontend edits when an integration-layer change is sufficient.
-- Follow existing file patterns (e.g., service modules in `services/`, UI pages in `ui/views/`, tools in `src/tools/`).
+- `uv run --group core python -m sentinel_core` — run the core service (port 8721).
+- `cd app && npm run tauri dev` — run the desktop app against a dev core.
+- `uv run lint` / `uv run format` / `uv run typecheck` — ruff check, ruff format, pyright.
+- `cd app && npm run build` — typecheck + build the frontend.
+- Installer: follow `packaging/README.md` (freeze core, freeze MCP exe, `npm run tauri build`).
 
-## Testing Guidelines
-- No single formal test suite is configured; use targeted script-based checks.
-- Add focused verification scripts near the relevant component (`devTest/` or feature folder).
-- Name tests descriptively (`test_<feature>.py`) and keep setup explicit (required `.env` keys, credentials).
-- Before PRs, run the launcher path and any changed component standalone.
+No formal test suite: verify against the running service (`/health`, `/chat`, WebSocket events).
 
-## Commit & Pull Request Guidelines
-- Recent history favors short, imperative summaries (examples: `Added MongoDB as agent memory`, `Fixed the Google Meet Service`, `UI: Dashboard`).
-- Keep commits scoped to one logical change and mention affected area (`backend`, `frontend`, `integration`).
-- PRs should include: purpose, key changes, manual test steps, env/config updates, and UI screenshots when views are modified.
-- Link related issues/tasks and note any follow-up work explicitly.
+## Coding Style
 
-## Security & Configuration Tips
-- Never commit `.env`, OAuth credentials, or API keys.
-- Backend and frontend each require their own `.env`; document new variables in both code comments and PR description.
+- Python 3.11+, ruff line length 100, rules E/F/I/B; ruff is the sole formatter; pyright for types.
+- Agent tools return short human-readable strings and never raise or leak tracebacks.
+- Secrets go to the Windows Credential Manager (`sentinel_core.config.set_secret`) — never into tracked files.
+- TypeScript: keep core event types in `app/src/lib/types.ts` in sync with `sentinel_core/events.py`.
+
+## Commit & PR Conventions
+
+- Feature branches + PRs to `main`; the maintainer merges.
+- Imperative commit subjects with a short body of concrete changes.
+- No AI attribution (no Co-Authored-By bots, no generated-with footers).

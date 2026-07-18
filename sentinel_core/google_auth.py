@@ -20,9 +20,6 @@ from sentinel_core.config import data_dir
 
 logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_LEGACY_CREDENTIALS = _REPO_ROOT / "Sentinel-AI-Frontend" / "credentials.json"
-
 # Serialize token refresh / interactive flows across executor threads.
 _lock = threading.Lock()
 
@@ -33,9 +30,9 @@ def _token_path() -> Path:
 
 def _client_secrets_path() -> Path:
     """Locate credentials.json, or raise a ValueError with setup instructions."""
-    for candidate in (data_dir() / "credentials.json", _LEGACY_CREDENTIALS):
-        if candidate.exists():
-            return candidate
+    candidate = data_dir() / "credentials.json"
+    if candidate.exists():
+        return candidate
     raise ValueError(
         "Google credentials.json not found. To set up Google integration:\n"
         "1. Go to https://console.cloud.google.com and create (or open) a project\n"

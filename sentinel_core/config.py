@@ -66,7 +66,6 @@ def _load_env_files() -> None:
     root = Path(__file__).resolve().parent.parent
     candidates = [
         root / ".env",
-        root / "Sentinel-AI-Backend" / ".env",
         data_dir() / ".env",
     ]
     if getattr(sys, "frozen", False):
