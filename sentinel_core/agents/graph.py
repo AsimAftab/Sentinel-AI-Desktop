@@ -31,6 +31,11 @@ class RouteDecision(BaseModel):
 
     next_agent: str = Field(description="Name of the agent to hand off to, or FINISH")
     task: str = Field(default="", description="Concise instruction for that agent")
+    response: str = Field(
+        default="",
+        description="When choosing FINISH: the final reply to the user, ready to be "
+        "spoken aloud (plain conversational text, no markdown). Empty otherwise.",
+    )
 
 
 class GraphState(MessagesState):
@@ -51,6 +56,13 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
         "- If the request is conversational (greeting, opinion, question you "
         "can answer directly), choose FINISH immediately.\n"
         "- If an agent already produced the needed result, choose FINISH.\n"
+        "- Commands arrive via speech-to-text: if the message looks like a "
+        "garbled fragment or mis-transcription (e.g. a few stray words with no "
+        "clear intent), choose FINISH and ask the user to repeat — never route "
+        "a fragment to an agent.\n"
+        "- When you choose FINISH, also write the final reply in 'response': "
+        "concise, natural, speakable prose based on the conversation and any "
+        "agent results above — no markdown, no bullet lists, no long URLs.\n"
     )
     if context:
         prompt += f"\n{context}\n"
@@ -137,12 +149,19 @@ def build_graph(llm: LLMManager, store: Store):
         return agent_node
 
     async def respond(state: GraphState, config) -> dict:
+        # Fast path: the supervisor already composed the reply in its FINISH
+        # decision — skip the extra LLM round-trip entirely.
+        prewritten = (state.get("route") or {}).get("response", "").strip()
+        if prewritten:
+            return {"messages": [AIMessage(content=prewritten, name="Sentinel")]}
         final_llm = llm.get(agent="Responder").with_config(tags=["final"])
         system = SystemMessage(
             "You are Sentinel, a friendly desktop AI assistant. Compose the final "
             "reply to the user based on the conversation and any agent results "
             "above. Be concise and natural; this reply may be spoken aloud, so "
-            "avoid markdown, bullet lists, and long URLs."
+            "avoid markdown, bullet lists, and long URLs. If the user's message "
+            "looks like a garbled fragment from speech-to-text, just ask them "
+            "briefly to repeat."
         )
         answer = await final_llm.ainvoke([system, *state["messages"]], config)
         return {"messages": [AIMessage(content=answer.content, name="Sentinel")]}

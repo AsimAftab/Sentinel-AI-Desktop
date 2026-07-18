@@ -63,6 +63,9 @@ class ChatService:
 
         inputs = {"messages": [*history, HumanMessage(content=text)], "hops": 0, "route": {}}
         final_text = ""
+        # Our agent node and the ReAct subgraph inside it share a name; count
+        # nesting depth so each agent run emits exactly one started/finished pair.
+        depth: dict[str, int] = {}
         try:
             graph = self._get_graph()
             async for ev in graph.astream_events(inputs, version="v2"):
@@ -73,9 +76,13 @@ class ChatService:
                     if route:
                         await emit(event(EventType.ROUTING, **route))
                 elif kind == "on_chain_start" and name in self._agent_names():
-                    await emit(event(EventType.AGENT_STARTED, agent=name))
+                    depth[name] = depth.get(name, 0) + 1
+                    if depth[name] == 1:
+                        await emit(event(EventType.AGENT_STARTED, agent=name))
                 elif kind == "on_chain_end" and name in self._agent_names():
-                    await emit(event(EventType.AGENT_FINISHED, agent=name))
+                    depth[name] = depth.get(name, 1) - 1
+                    if depth[name] == 0:
+                        await emit(event(EventType.AGENT_FINISHED, agent=name))
                 elif kind == "on_tool_start":
                     await emit(
                         event(
@@ -99,6 +106,11 @@ class ChatService:
                     if token:
                         final_text += token
                         await emit(event(EventType.TOKEN, text=token))
+                elif kind == "on_chain_end" and name == "respond" and not final_text:
+                    # Supervisor fast path: reply was prewritten, no tokens streamed.
+                    messages = (ev["data"].get("output") or {}).get("messages") or []
+                    if messages:
+                        final_text = messages[-1].content
         except Exception as exc:  # noqa: BLE001 — a turn failure must not kill the socket
             logger.exception("Turn %s failed", turn_id)
             self.store.add_memory("error", {"error": str(exc)}, session_id=session_id)

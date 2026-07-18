@@ -23,6 +23,27 @@ from .store import Store
 logger = logging.getLogger(__name__)
 
 
+class Hub:
+    """Fan-out of events to every connected WebSocket (voice events, notably)."""
+
+    def __init__(self):
+        self._connections: set[WebSocket] = set()
+
+    def add(self, ws: WebSocket) -> None:
+        self._connections.add(ws)
+
+    def remove(self, ws: WebSocket) -> None:
+        self._connections.discard(ws)
+
+    async def broadcast(self, event: Event) -> None:
+        payload = event.to_wire()
+        for ws in list(self._connections):
+            try:
+                await ws.send_json(payload)
+            except Exception:  # noqa: BLE001 — a dead socket must not break the pipeline
+                self._connections.discard(ws)
+
+
 def load_settings(store: Store) -> Settings:
     return Settings.from_env().apply_overrides(store.get_settings_overrides())
 
@@ -32,11 +53,15 @@ async def lifespan(app: FastAPI):
     store = Store()
     app.state.store = store
     app.state.chat = ChatService(load_settings(store), store)
+    app.state.hub = Hub()
+    app.state.voice = None
     pruned = store.prune_memory()
     if pruned:
         logger.info("Pruned %d expired memory rows", pruned)
     logger.info("Sentinel Core %s ready", __version__)
     yield
+    if app.state.voice is not None:
+        await app.state.voice.stop()
     store.close()
 
 
@@ -109,6 +134,36 @@ async def put_secret(update: SecretUpdate):
     return {"saved": update.name}
 
 
+@app.post("/voice/start")
+async def voice_start():
+    if app.state.voice is not None and app.state.voice.running:
+        return {"running": True, "state": app.state.voice.state}
+    try:
+        from .voice.pipeline import VoicePipeline
+    except Exception as exc:  # noqa: BLE001 — missing audio deps/hardware
+        raise HTTPException(500, f"Voice dependencies unavailable: {exc}") from exc
+    pipeline = VoicePipeline(app.state.chat, app.state.store, app.state.hub.broadcast)
+    try:
+        await pipeline.start()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Could not start voice pipeline: {exc}") from exc
+    app.state.voice = pipeline
+    return {"running": True, "state": pipeline.state}
+
+
+@app.post("/voice/stop")
+async def voice_stop():
+    if app.state.voice is not None:
+        await app.state.voice.stop()
+    return {"running": False}
+
+
+@app.get("/voice/status")
+async def voice_status():
+    voice = app.state.voice
+    return {"running": bool(voice and voice.running), "state": voice.state if voice else "idle"}
+
+
 @app.get("/sessions/{session_id}/messages")
 async def session_messages(session_id: str):
     return app.state.store.get_messages(session_id, limit=200)
@@ -131,6 +186,8 @@ async def chat(request: ChatRequest):
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     store: Store = app.state.store
+    hub: Hub = app.state.hub
+    hub.add(ws)
     session_id = store.start_session()
 
     async def emit(event: Event) -> None:
@@ -154,4 +211,5 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
+        hub.remove(ws)
         store.end_session(session_id)

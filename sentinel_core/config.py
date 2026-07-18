@@ -54,15 +54,23 @@ def data_dir() -> Path:
     return path
 
 
+_env_loaded = False
+
+
 def _load_env_files() -> None:
+    global _env_loaded
+    if _env_loaded:
+        return
     root = Path(__file__).resolve().parent.parent
     for candidate in (root / ".env", root / "Sentinel-AI-Backend" / ".env"):
         if candidate.exists():
             load_dotenv(candidate, override=False)
+    _env_loaded = True
 
 
 def get_secret(name: str) -> str | None:
     """Env first (explicit wins), then OS keyring."""
+    _load_env_files()
     value = os.environ.get(name)
     if value:
         return value
