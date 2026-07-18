@@ -1,0 +1,231 @@
+"""LangGraph v2: typed state, structured-output supervisor, agent handoff loop.
+
+Topology: supervisor → (agent → supervisor)* → respond → END.
+The supervisor emits a structured RouteDecision (no string parsing); agents
+are ReAct subgraphs from the registry; a dedicated respond node composes the
+final user-facing answer and is the node whose tokens stream to the UI
+(tagged "final").
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from langchain_core.messages import AIMessage, SystemMessage
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import MessagesState
+from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field
+
+from ..llm import LLMManager
+from ..store import Store
+from .registry import AgentDefinition, load_agents
+
+logger = logging.getLogger(__name__)
+
+MAX_HOPS = 4
+AGENT_TIMEOUT_S = 45
+
+
+class RouteDecision(BaseModel):
+    """Supervisor routing decision."""
+
+    next_agent: str = Field(description="Name of the agent to hand off to, or FINISH")
+    task: str = Field(default="", description="Concise instruction for that agent")
+    response: str = Field(
+        default="",
+        description="When choosing FINISH: the final reply to the user, ready to be "
+        "spoken aloud (plain conversational text, no markdown). Empty otherwise.",
+    )
+
+
+class GraphState(MessagesState):
+    hops: int
+    route: dict  # last RouteDecision as dict
+
+
+def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
+    lines = "\n".join(f"- {a.name}: {a.description}" for a in agents)
+    prompt = (
+        "You are the supervisor of Sentinel, a desktop AI assistant. "
+        "Decide which specialist agent should act next, or FINISH when the "
+        "user's request has been fully handled.\n\n"
+        f"Agents:\n{lines}\n\n"
+        "Rules:\n"
+        "- Route to exactly one agent per step; multi-part requests may need "
+        "several steps before FINISH.\n"
+        "- Write 'task' self-contained: resolve pronouns, follow-ups, and likely "
+        "speech-to-text misspellings using the conversation (e.g. after "
+        "discussing computer scientists, 'What about Rosevalt?' means "
+        "'Tell me about a person, probably Roosevelt — user said Rosevalt').\n"
+        "- If the request is conversational (greeting, opinion, general "
+        "knowledge), choose FINISH immediately.\n"
+        "- NEVER invent real-time or external facts. Weather, news, prices, "
+        "web lookups, calendar, email, notes, music state, and system state "
+        "MUST come from an agent in this conversation — if none has provided "
+        "it yet, route to the right agent instead of answering.\n"
+        "- If an agent already produced the needed result, choose FINISH.\n"
+        "- Commands arrive via speech-to-text: if the message looks like a "
+        "garbled fragment or mis-transcription (e.g. a few stray words with no "
+        "clear intent), choose FINISH and ask the user to repeat — never route "
+        "a fragment to an agent.\n"
+        "- When you choose FINISH, also write the final reply in 'response': "
+        "concise, natural, speakable prose based on the conversation and any "
+        "agent results above — no markdown, no bullet lists, no long URLs.\n"
+    )
+    if context:
+        prompt += (
+            "\nBackground from earlier activity (may be STALE — never present "
+            f"it as current fact; re-fetch via an agent if asked again):\n{context}\n"
+        )
+    return prompt
+
+
+def _agent_system_prompt(definition: AgentDefinition, context: str) -> str:
+    base = definition.system_prompt or (
+        f"You are the {definition.name} agent of Sentinel, a desktop AI assistant. "
+        f"{definition.description} Use your tools to complete the task, then reply "
+        "with a concise factual summary of what you did or found. Do not address "
+        "the user directly; your output is consumed by a supervisor. "
+        "Budget: at most 3 tool calls per task — never repeat a similar call "
+        "hoping for better results. If results are ambiguous (e.g. a likely "
+        "misspelling), go with your best interpretation and say so instead of "
+        "retrying variations."
+    )
+    if context:
+        base += f"\n\n{context}"
+    return base
+
+
+def build_graph(llm: LLMManager, store: Store, extra_agents=None):
+    """Build and compile the agent graph from the registry. Called lazily.
+
+    extra_agents: pre-loaded (AgentDefinition, tools) pairs — e.g. MCP-backed
+    agents whose tools were loaded asynchronously by the caller.
+    """
+    loaded = load_agents() + list(extra_agents or [])
+    agents = [d for d, _ in loaded]
+    valid_targets = {d.name for d in agents} | {"FINISH"}
+
+    router_llm = llm.get(agent="Supervisor").with_structured_output(RouteDecision)
+
+    def make_prompt(definition: AgentDefinition):
+        # Callable prompt: memory context is fetched at invocation time, not baked
+        # in at graph-build time.
+        def prompt(state) -> list:
+            system = _agent_system_prompt(definition, store.context_block())
+            return [SystemMessage(system), *state["messages"]]
+
+        return prompt
+
+    react_agents = {
+        d.name: create_react_agent(
+            llm.get(agent=d.name),
+            tools,
+            prompt=make_prompt(d),
+            name=d.name,
+        )
+        for d, tools in loaded
+    }
+
+    async def supervisor(state: GraphState) -> dict:
+        if state.get("hops", 0) >= MAX_HOPS:
+            return {"route": {"next_agent": "FINISH", "task": ""}}
+        messages = [
+            SystemMessage(_supervisor_prompt(agents, store.context_block())),
+            *state["messages"],
+        ]
+        decision = await router_llm.ainvoke(messages)
+        if decision.next_agent not in valid_targets:
+            logger.warning("Supervisor chose unknown agent %r; finishing", decision.next_agent)
+            decision.next_agent = "FINISH"
+        return {"route": decision.model_dump(), "hops": state.get("hops", 0) + 1}
+
+    def route_next(state: GraphState) -> str:
+        return state["route"]["next_agent"]
+
+    def make_agent_node(name: str):
+        async def agent_node(state: GraphState) -> dict:
+            task = state["route"].get("task") or ""
+            inputs = list(state["messages"])
+            if task:
+                inputs.append(AIMessage(content=f"[Supervisor → {name}] {task}", name="Supervisor"))
+            try:
+                # recursion_limit ~ 4 tool rounds; wait_for stops runaway loops
+                # dead — either way the supervisor still gets something to say.
+                result = await asyncio.wait_for(
+                    react_agents[name].ainvoke({"messages": inputs}, {"recursion_limit": 10}),
+                    timeout=AGENT_TIMEOUT_S,
+                )
+            except TimeoutError:
+                logger.warning("Agent %s timed out after %ss", name, AGENT_TIMEOUT_S)
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=f"[{name} agent timed out before finishing the task]",
+                            name=name,
+                        )
+                    ]
+                }
+            except Exception as exc:  # noqa: BLE001 — incl. GraphRecursionError
+                logger.warning("Agent %s failed: %s", name, exc)
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=f"[{name} agent could not complete the task: "
+                            f"{type(exc).__name__}]",
+                            name=name,
+                        )
+                    ]
+                }
+            final = result["messages"][-1]
+            summary = final.content if isinstance(final.content, str) else str(final.content)
+            store.add_memory(
+                "agent_action",
+                {
+                    "input": task,
+                    "output": summary[:500],
+                    "tools_used": sorted(
+                        {m.name for m in result["messages"] if m.type == "tool" and m.name}
+                    ),
+                },
+                agent=name,
+            )
+            return {"messages": [AIMessage(content=summary, name=name)]}
+
+        return agent_node
+
+    async def respond(state: GraphState, config) -> dict:
+        # Fast path: the supervisor already composed the reply in its FINISH
+        # decision — skip the extra LLM round-trip entirely.
+        prewritten = (state.get("route") or {}).get("response", "").strip()
+        if prewritten:
+            return {"messages": [AIMessage(content=prewritten, name="Sentinel")]}
+        final_llm = llm.get(agent="Responder").with_config(tags=["final"])
+        system = SystemMessage(
+            "You are Sentinel, a friendly desktop AI assistant. Compose the final "
+            "reply to the user based on the conversation and any agent results "
+            "above. Be concise and natural; this reply may be spoken aloud, so "
+            "avoid markdown, bullet lists, and long URLs. If the user's message "
+            "looks like a garbled fragment from speech-to-text, just ask them "
+            "briefly to repeat."
+        )
+        answer = await final_llm.ainvoke([system, *state["messages"]], config)
+        return {"messages": [AIMessage(content=answer.content, name="Sentinel")]}
+
+    builder = StateGraph(GraphState)
+    builder.add_node("supervisor", supervisor)
+    builder.add_node("respond", respond)
+    for name in react_agents:
+        builder.add_node(name, make_agent_node(name))
+        builder.add_edge(name, "supervisor")
+
+    builder.add_edge(START, "supervisor")
+    builder.add_conditional_edges(
+        "supervisor",
+        route_next,
+        {**{name: name for name in react_agents}, "FINISH": "respond"},
+    )
+    builder.add_edge("respond", END)
+    return builder.compile()
