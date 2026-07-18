@@ -29,6 +29,20 @@ cd Sentinel-AI-Frontend && python main.py
 python setup_launcher.py
 ```
 
+Dependencies are also managed via `uv` and `pyproject.toml` (dependency groups: `backend`, `frontend`, `dev`; lockfile `uv.lock`).
+
+### Lint / Format / Typecheck
+```bash
+uv run lint        # ruff check .
+uv run format      # ruff format . (ruff is the sole formatter — no black, no isort)
+uv run typecheck   # pyright
+```
+
+Ruff config lives in `pyproject.toml` (line-length 100, rules E/F/I/B, target py311). Pyright config in `pyrightconfig.json`.
+
+### Testing
+There is no formal test suite (no pytest). Testing is script-based: `test_threading.py` at the root and `Sentinel-AI-Frontend/devTest/` scripts (e.g. `test_atlas_connection.py`), plus the manual component tests described in "Testing Individual Components" below.
+
 ### Environment Configuration
 The application requires environment variables in two `.env` files:
 
@@ -38,13 +52,30 @@ The application requires environment variables in two `.env` files:
 - `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `SPOTIPY_REDIRECT_URI` - Spotify integration
 - `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT_NAME`, `AZURE_OPENAI_API_VERSION` - Azure OpenAI LLM
 - `ELEVENLABS_API_KEY` - ElevenLabs text-to-speech API key
-- `ELEVENLABS_VOICE_ID` - Optional voice ID (defaults to Sarah)
 - `TTS_ENABLED` - Enable/disable text-to-speech (true/false)
+- `TTS_FALLBACK_ENABLED`, `TTS_FALLBACK_RATE` - Offline TTS fallback when ElevenLabs unavailable
 - `GENIUS_API_TOKEN` - Optional Genius API for full lyrics text
 - `LANGCHAIN_TRACING_V2` - Enable LangSmith tracing (true/false) for debugging
 - `LANGCHAIN_API_KEY` - LangSmith API key from https://smith.langchain.com/settings
 - `LANGCHAIN_PROJECT` - LangSmith project name (e.g., "sentinel-ai-desktop-backend")
 - `LANGCHAIN_ENDPOINT` - LangSmith API endpoint (https://api.smith.langchain.com)
+
+**LLM provider selection** (backend `.env`; can also be configured live from the frontend Settings page, persisted to MongoDB via `settings_service.py`):
+- `LLM_PROVIDER` - Primary provider: `azure` (default) | `ollama` | `openai` | `zhipu`
+- `LLM_TEMPERATURE`, `LLM_FALLBACK_ENABLED`, `LLM_CACHE_ENABLED` - Global LLM behavior
+- `AZURE_OPENAI_ENABLED` - Enable Azure provider (default true; other providers default disabled)
+- `OLLAMA_ENABLED`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, `OLLAMA_TIMEOUT` - Local Ollama provider
+- `OPENAI_ENABLED`, `OPENAI_API_KEY`, `OPENAI_MODEL` - OpenAI provider
+- `ZHIPU_ENABLED`, `ZHIPU_API_KEY`, `ZHIPU_MODEL`, `ZHIPU_BASE_URL` - Zhipu AI (GLM) provider
+- `LLM_AGENT_<AGENT>` / `LLM_AGENT_<AGENT>_TEMPERATURE` - Per-agent provider/temperature overrides (e.g. `LLM_AGENT_MUSIC=ollama`)
+
+**Voice tuning** (backend `.env`, all optional):
+- `WAKE_WORD_SENSITIVITY` - Porcupine sensitivity
+- `STT_LANGUAGE`, `STT_ENERGY_THRESHOLD`, `STT_PAUSE_THRESHOLD` - Speech recognition tuning
+- `CONTINUOUS_LISTENING` - Follow-up conversation mode
+
+**MongoDB (also used by backend** for agent memory and Spotify token storage):
+- `MONGODB_COLLECTION_TOKENS` - Collection for OAuth tokens (`token_manager.py`, `spotify_user_auth.py`)
 
 **Sentinel-AI-Frontend/.env** (Database):
 - `MONGODB_CONNECTION_STRING` - MongoDB Atlas connection string
@@ -91,11 +122,9 @@ Thread-safe singleton managing bidirectional event communication:
 4. `TextToSpeech` - Converts AI responses to speech using ElevenLabs (NEW!)
 
 **Multi-Agent System** (`src/graph/graph_builder.py`):
-- **LLM**: Azure OpenAI GPT (configured via environment variables)
+- **LLM**: Multi-provider via `src/utils/llm_config.py` — Azure OpenAI (default), Ollama (local), OpenAI, and Zhipu AI (GLM). Supports per-agent provider/temperature assignment, automatic fallback, instance caching, and live reload (`reload_llm_config()`). Config loads from env vars or MongoDB (set from the frontend Settings page). See `MULTIPLE_LLM_PROVIDERS_IMPLEMENTATION.md`.
 - **Supervisor Agent**: Routes tasks to specialized agents (Browser, Music, Meeting, System, Productivity, Notes, Email, or FINISH)
-- **Browser Agent**: Uses `browser_tools` for web search/scraping (Tavily search, weather, news, translation)
-- **Music Agent**: Uses `music_tools` + `playwright_music_tools` for Spotify/YouTube (auto-play, lyrics, genres)
-- **Meeting Agent**: Uses `meeting_tools` for Google Meet and Calendar (create, schedule, list, join, cancel meetings)
+- **Specialist agents** (declared in `agent_registry.py`): Browser (`browser_tools`), Music (`music_tools`, custom prompt), Meeting (`meeting_tools`), System (`system_tools`), Productivity (`productivity_tools`), Notes (`notes_tools`), Email (`email_tools`)
 - **Graph Framework**: LangGraph with ReAct agents using `langgraph.prebuilt.create_react_agent`
 
 **Key Files**:
@@ -112,10 +141,12 @@ Thread-safe singleton managing bidirectional event communication:
 - `src/utils/llm_config.py` - Multi-provider LLM config with per-agent temperature
 - `src/tools/browser_tools.py` - Enhanced web tools (14 tools: search, weather, news, translation, etc.)
 - `src/tools/music_tools.py` - Enhanced Spotify/YouTube tools (25 tools: lyrics, genres, moods)
-- `src/tools/playwright_music_tools.py` - Playwright-based auto-play music tools (6 tools)
 - `src/tools/meeting_tools.py` - Google Meet and Calendar integration (6 tools)
 - `src/tools/system_tools.py` - System control tools (15 tools: volume, brightness, apps)
 - `src/tools/productivity_tools.py` - Productivity tools (6 tools: timers, alarms)
+- `src/tools/notes_tools.py` - Notes agent tools
+- `src/tools/email_tools.py` - Email agent tools
+- `src/utils/spotify_user_auth.py`, `src/utils/token_manager.py` - Per-user Spotify OAuth with MongoDB-backed token storage
 
 ### Frontend Architecture (Sentinel-AI-Frontend/)
 
@@ -125,12 +156,17 @@ Thread-safe singleton managing bidirectional event communication:
 1. `LoginPage` - User authentication (keyring-based session management)
 2. `SignupPage` - User registration
 3. `DashboardPage` - Main dashboard with service cards and backend status widget
+4. `SettingsPage` (`ui/views/settings_page.py`) - LLM provider configuration UI: primary provider dropdown, global temperature, fallback toggle, per-provider enable/API-key/endpoint/model cards. Persisted to MongoDB via `database/settings_service.py`; the backend reads this config at LLM initialization.
+5. `LogsPage` (`ui/views/logs_page.py`) - Live backend log viewer
 
 **Key Components**:
 - `auth/keyring_auth.py` - Secure credential storage using system keyring
 - `auth/session_manager.py` - Session persistence and validation
 - `database/user_service.py` - MongoDB user management
+- `database/settings_service.py` - MongoDB-persisted LLM settings (shared with backend)
 - `services/meet_service.py` - Google Meet integration (OAuth2, event scheduling)
+- `services/spotify_service.py` - Spotify account linking
+- `services/token_store.py` - OAuth token storage pattern
 - `services/service_manager.py` - Service lifecycle management
 - `ui/views/dashboard.py` - Main dashboard view
 
@@ -208,16 +244,17 @@ The launcher ensures graceful shutdown via `threading.Event`:
 
 ## Dependencies
 
-**Backend** (295 packages):
-- Core: `langgraph`, `langchain`, `langchain-openai`, `langsmith`
-- Voice: `PyAudio`, `SpeechRecognition`, `pvporcupine` (wake word)
-- Tools: `spotipy` (Spotify), `tavily-python` (search), `selenium` (browser)
-- ML: `transformers`, `torch`, `sentence-transformers`
-- Debugging: `langsmith` (tracing and observability)
+Declared in `pyproject.toml` dependency groups (`backend`, `frontend`, `dev`), locked with `uv.lock`.
 
-**Frontend** (11 packages):
-- UI: `PyQt5`
-- Auth: `keyring`, `bcrypt`
+**Backend** (group `backend`):
+- Core: `langgraph`, `langchain`, `langchain-openai`, `langchain-ollama`, `langsmith`
+- Voice: `PyAudio`, `SpeechRecognition`, `pvporcupine` (wake word), `elevenlabs`, `pygame`
+- Tools: `spotipy` (Spotify), `playwright` (browser automation), `lyricsgenius`, `pycaw`/`screen-brightness-control`/`pyautogui` (system control)
+- Google APIs + `pymongo` (agent memory, tokens)
+
+**Frontend** (group `frontend`):
+- UI: `PyQt5`, `QtAwesome`
+- Auth: `keyring`, `bcrypt`, `cryptography`
 - Database: `pymongo`, `dnspython`
 - Google APIs: `google-auth`, `google-auth-oauthlib`, `google-api-python-client`
 
@@ -417,7 +454,9 @@ Ensure `credentials.json` exists in `Sentinel-AI-Frontend/`. Token stored in `to
 
 ## Technical Roadmap
 
-See **`ENHANCEMENTS.md`** at project root for the comprehensive technical audit and enhancement roadmap. It catalogs:
+**The project is being rebuilt per `REBUILD_PLAN.md`** (Tauri 2 + React frontend, async FastAPI `sentinel_core` service, Groq/Cerebras providers, Windows MCP server). The legacy `Sentinel-AI-Backend`/`Sentinel-AI-Frontend`/`integration` code described above is the reference implementation being ported, not the target. Historical design docs live in `docs/`.
+
+See **`docs/ENHANCEMENTS.md`** for the earlier technical audit and enhancement roadmap. It catalogs:
 - 8 critical bugs with file paths and line numbers
 - 7 security vulnerabilities with suggested fixes
 - 12 performance optimizations
@@ -429,7 +468,9 @@ When implementing fixes or new features, consult `ENHANCEMENTS.md` for context o
 
 ## Code Style Notes
 
-- Backend uses print statements for logging (no logging framework currently)
+- Backend uses the standard `logging` module, configured centrally in `src/utils/log_config.py` (streamed to the frontend via `LogStreamHandler`)
 - Frontend uses PyQt5 signals/slots for event handling
 - Integration layer uses dataclasses and type hints
 - Environment variables loaded via `python-dotenv`
+- Formatting/linting via ruff (`uv run format` / `uv run lint`), typechecking via pyright — see `pyproject.toml`
+- `AGENTS.md` at the root holds repo guidelines (structure, commit/PR conventions)
