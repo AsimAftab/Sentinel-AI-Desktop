@@ -31,7 +31,7 @@ function TraceRow({ item }: { item: TraceItem }) {
 }
 
 export default function HomeView() {
-  const { messages, streaming, busy, trace, connected, voice, voiceBusy, voiceError, sendChat, toggleVoice } =
+  const { messages, streaming, busy, trace, connected, voice, voiceBusy, voiceError, providers, sendChat, toggleVoice } =
     useSentinel();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -47,9 +47,19 @@ export default function HomeView() {
   };
 
   const voiceOn = voice !== "off";
+  const noProvider =
+    connected &&
+    Object.keys(providers).length > 0 &&
+    !Object.values(providers).some((status) => status === "ok");
 
   return (
     <div className="flex h-full flex-col">
+      {noProvider && (
+        <div className="border-b border-warn/25 bg-warn/10 px-6 py-2.5 text-xs text-warn">
+          No AI provider is configured yet — open <b>Settings</b> and paste an API key (Groq has a
+          free tier at console.groq.com) to bring Sentinel to life.
+        </div>
+      )}
       <header className="flex items-center justify-between border-b border-edge px-6 py-4">
         <div>
           <h1 className="text-base font-semibold">Assistant</h1>

@@ -61,8 +61,17 @@ def _load_env_files() -> None:
     global _env_loaded
     if _env_loaded:
         return
+    import sys
+
     root = Path(__file__).resolve().parent.parent
-    for candidate in (root / ".env", root / "Sentinel-AI-Backend" / ".env"):
+    candidates = [
+        root / ".env",
+        root / "Sentinel-AI-Backend" / ".env",
+        data_dir() / ".env",
+    ]
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / ".env")
+    for candidate in candidates:
         if candidate.exists():
             load_dotenv(candidate, override=False)
     _env_loaded = True

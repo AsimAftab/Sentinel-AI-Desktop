@@ -47,3 +47,11 @@ credentials.json
 token.json
 user_context.json
 **/user_context.json
+
+# packaging artifacts
+packaging/build/
+packaging/dist/
+mcp-windows/build/
+mcp-windows/dist/
+mcp-windows/*.spec
+app/src-tauri/binaries/

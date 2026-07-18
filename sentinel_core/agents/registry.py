@@ -38,6 +38,22 @@ class MCPAgentDefinition:
     args: tuple[str, ...]
 
 
+def _windows_mcp_command() -> tuple[str, tuple[str, ...]]:
+    """Dev: run from source via uv. Packaged: sibling frozen exe (or env override)."""
+    import os
+    import sys
+
+    override = os.environ.get("SENTINEL_MCP_WINDOWS_EXE")
+    if override:
+        return override, ()
+    if getattr(sys, "frozen", False):
+        exe = Path(sys.executable).parent / "sentinel-mcp-windows.exe"
+        return str(exe), ()
+    return "uv", ("run", "--project", str(REPO_ROOT / "mcp-windows"), "sentinel-mcp-windows")
+
+
+_mcp_cmd, _mcp_args = _windows_mcp_command()
+
 MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     MCPAgentDefinition(
         name="System",
@@ -45,8 +61,8 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
         "launching and closing apps, window focus, screenshots, system info, "
         "lock screen and power actions.",
         server_name="windows",
-        command="uv",
-        args=("run", "--project", str(REPO_ROOT / "mcp-windows"), "sentinel-mcp-windows"),
+        command=_mcp_cmd,
+        args=_mcp_args,
     ),
 ]
 
