@@ -52,6 +52,25 @@ dev = [
     "ruff>=0.15.4",
 ]
 
+core = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "langgraph>=0.4.3",
+    "langchain-core>=0.3.68",
+    "langchain-openai>=0.3.27",
+    "langchain-ollama>=0.3.4",
+    "keyring>=24.0.0",
+    "python-dotenv>=1.1.0",
+    "spotipy>=2.25.1",
+    "google-auth>=2.40.2",
+    "google-auth-oauthlib>=1.2.1",
+    "google-api-python-client>=2.154.0",
+    "beautifulsoup4>=4.13.4",
+]
+
 frontend = [
     "PyQt5==5.15.11",
     "PyQt5-Qt5==5.15.2",
