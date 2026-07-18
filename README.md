@@ -1,107 +1,136 @@
 <h1 align="center">🛡️ Sentinel AI</h1>
 
 <p align="center">
-  <b>A voice-controlled desktop AI assistant.</b><br/>
-  Say <i>"Sentinel"</i> — then just talk to your computer.
+  <b>A voice-controlled desktop AI assistant for Windows.</b><br/>
+  Say the wake word — then just talk to your computer.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54" />
-  <img src="https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
-  <img src="https://img.shields.io/badge/PyQt5-41CD52?style=for-the-badge&logo=qt&logoColor=white" />
+  <img src="https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" />
+  <img src="https://img.shields.io/badge/Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white" />
+  <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" />
+  <img src="https://img.shields.io/badge/Groq-F55036?style=for-the-badge&logoColor=white" />
 </p>
 
 ---
 
 ## What it is
 
-Sentinel AI is a desktop assistant you drive with your voice. It listens for a
-custom **"Sentinel"** wake word, transcribes what you say, routes the request to
-whichever specialist agent can handle it, and acts on your machine — opening
-pages, playing music, scheduling meetings, taking screenshots, controlling system
-settings.
+Sentinel AI is a desktop assistant you drive by voice or chat. It listens for a
+wake word ("Hey Jarvis" by default, custom models supported), transcribes your
+speech with **Groq Whisper** at ~216× real-time, routes the request through a
+**LangGraph supervisor** to a specialist agent, acts on your machine, and
+**speaks the answer back** — starting before the full response is even
+generated, and interruptible mid-sentence by saying the wake word again.
 
-It is built as a **supervised multi-agent system** on LangGraph: a supervisor node
-reads the request and delegates to one of five agents, each owning its own toolset.
+Everything is **local-first**: conversation history, notes, and settings live
+in SQLite on your machine; API keys live in the Windows Credential Manager. No
+accounts, no cloud database.
 
 ## 🤖 The agents
 
 | Agent | Purpose | Tools |
 |---|---|---|
-| 🌐 **Browser** | Web search, scraping, weather, news, translation, currency | 14 |
-| 🎵 **Music** | Playback and discovery | 25+ |
-| 📅 **Meeting** | Google Meet and Calendar management | 6 |
-| ⚙️ **System** | Computer and OS control | 15 |
-| ⏱️ **Productivity** | Time management and focus | 6 |
+| 🌐 **Browser** | Web search (Tavily), weather, news, translation, stocks, Wikipedia | 13 |
+| 🎵 **Music** | Spotify playback and discovery | 9 |
+| 📅 **Meeting** | Google Meet and Calendar | 5 |
+| ✉️ **Email** | Gmail: read, search, draft, send | 5 |
+| 📝 **Notes** | Local notes (SQLite) | 6 |
+| ⚙️ **System** | Volume, brightness, apps, windows, media keys, screenshots, power | 15 |
 
-**5 agents · 66+ tools**, coordinated by a supervisor that picks the right one and
-can chain several together for a single spoken request.
+The System agent's tools come from **[`mcp-windows/`](mcp-windows/)** — a
+standalone [MCP](https://modelcontextprotocol.io) server built on real OS APIs
+(no UI automation hacks) that also works in Claude Desktop or any MCP client.
+
+## 🧠 Multi-provider brain
+
+Bring your own model: **Groq** (default), **Cerebras**, Azure OpenAI, OpenAI,
+Ollama (fully local), or Zhipu AI — switchable live from Settings with no
+restart, with per-agent assignment and automatic fallback. Groq's free tier is
+enough to run everything, including speech-to-text.
 
 ## 🎙️ How a request flows
 
 ```
-"Sentinel"  ──►  wake word (Porcupine)
-                      │
-                 speech → text (Whisper / SpeechRecognition)
-                      │
-                 supervisor (LangGraph)  ──►  routes to agent
-                      │
-                 agent runs its tools  ──►  spoken + on-screen reply
+"Hey Jarvis"  ──►  wake word (openWakeWord, on-device)
+                        │  chime
+                   speech → text (Groq Whisper large-v3-turbo)
+                        │
+                   supervisor (LangGraph, structured routing)
+                        │
+                   agent runs its tools ──► supervisor ──► reply
+                        │
+                   streaming TTS (ElevenLabs, barge-in aware)
 ```
 
-## 🧱 Stack
-
-- **Orchestration** — LangGraph + LangChain (supervisor / agent graph)
-- **Models** — Anthropic Claude, with Ollama for local inference
-- **Voice** — Porcupine wake word, Whisper + SpeechRecognition, PyAudio
-- **Search** — Tavily
-- **API** — FastAPI + Uvicorn
-- **Desktop UI** — PyQt5
-
-## 📁 Layout
-
-This repo is the full system — backend and desktop frontend together.
+## 🏗️ Architecture
 
 ```
-Sentinel-AI-Backend/    FastAPI + LangGraph agent system, tools, wake word
-Sentinel-AI-Frontend/   PyQt5 desktop client (auth, UI, services, database)
+┌─────────────────────────────────────────────────┐
+│  app/ — Tauri 2 + React desktop app             │
+│  chat · voice toggle · live agent trace ·       │
+│  settings · activity log                        │
+└──────────────┬──────────────────────────────────┘
+               │ WebSocket (events/streaming) + REST
+┌──────────────▼──────────────────────────────────┐
+│  sentinel_core/ — async FastAPI service         │
+│  voice pipeline · LangGraph agents · SQLite ·   │
+│  keyring secrets · live settings reload         │
+└──────┬──────────────────────────┬───────────────┘
+       │ MCP (stdio)              │ HTTPS
+┌──────▼───────────┐   ┌──────────▼────────────────┐
+│  mcp-windows/    │   │  Groq · Cerebras · Spotify│
+│  Windows control │   │  Google · Tavily · Eleven │
+└──────────────────┘   └───────────────────────────┘
 ```
 
 ## 🚀 Getting started
 
-```bash
-# 1. Backend
-cd Sentinel-AI-Backend
-pip install -r requirements.txt
-cp .env.example .env        # add your API keys
-python main.py
+### Run from source
 
-# 2. Frontend (in a second terminal)
-cd Sentinel-AI-Frontend
-pip install -r requirements.txt
-python main.py
+Requirements: Windows 11, [uv](https://docs.astral.sh/uv/), Node 20+, Rust (for the app shell).
+
+```bash
+# 1. Core service
+uv run --group core python -m sentinel_core
+
+# 2. Desktop app (second terminal)
+cd app && npm install && npm run tauri dev
 ```
 
-You'll need API keys for your model provider and for Tavily (web search). See
-`Sentinel-AI-Backend/.env.example` for the full list.
+On first launch, open **Settings** and paste an API key — a free
+[Groq key](https://console.groq.com/keys) unlocks chat, all agents, and
+speech-to-text. Add an [ElevenLabs](https://elevenlabs.io) key for premium
+voices (offline TTS is the fallback). Keys go straight to the Windows
+Credential Manager — never to files.
 
-## 📚 Documentation
+### Build the installer
 
-| Doc | What's in it |
-|---|---|
-| [AGENTS_OVERVIEW.md](AGENTS_OVERVIEW.md) | Every agent and all 66+ tools |
-| [VOICE_COMMANDS.md](VOICE_COMMANDS.md) | What you can actually say |
-| [SYSTEM_CONTROL_AGENT.md](SYSTEM_CONTROL_AGENT.md) | System control capabilities |
-| [PRODUCTIVITY_AGENT.md](PRODUCTIVITY_AGENT.md) | Productivity agent |
-| [SCREENSHOT_FEATURE.md](SCREENSHOT_FEATURE.md) | Screen capture |
-| [MEETING_QUICKSTART.md](MEETING_QUICKSTART.md) · [GOOGLE_MEET_SETUP.md](GOOGLE_MEET_SETUP.md) | Meetings & Calendar setup |
-| [ARCHITECTURE_DIAGRAM.txt](ARCHITECTURE_DIAGRAM.txt) | System architecture |
+See [`packaging/README.md`](packaging/README.md) — three steps produce a
+self-contained NSIS installer (~120 MB); the target machine needs no Python,
+Node, or Rust.
 
-<!-- TODO (Asim): drop a short screen-recording GIF right here — a 10s clip of you
-     saying "Sentinel, ..." and it acting will do more for this repo than any
-     amount of README text. -->
+## 🎙️ Voice tips
 
----
+- Speak after the **chime**; say the wake word during playback to interrupt
+- Custom wake word: train one in ~1 hour (free) with
+  [openWakeWord's Colab notebook](https://colab.research.google.com/github/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb),
+  then point `WAKEWORD_MODEL` at the `.onnx`
+- `CONTINUOUS_LISTENING=true` enables follow-ups without repeating the wake
+  word (off by default — it will treat ambient speech as commands)
 
-<p align="center">Built by <a href="https://github.com/AsimAftab">Asim Aftab</a> · <a href="https://asimaftab.app">asimaftab.app</a></p>
+## 🗺️ Roadmap
+
+- [ ] Auto-update (Tauri updater + GitHub Releases)
+- [ ] Custom "Sentinel" wake-word model
+- [ ] Streaming STT (sub-1.5s voice turns)
+- [ ] Crash reporting
+
+## 📚 More
+
+- [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) — contributor guides
+- [`REBUILD_PLAN.md`](REBUILD_PLAN.md) — the v2 rebuild plan and audit
+- [`mcp-windows/README.md`](mcp-windows/README.md) — the Windows MCP server, incl. Claude Desktop setup
+- [`docs/`](docs/) — historical design docs from the v1 prototype
