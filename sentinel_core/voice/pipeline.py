@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 
 from ..events import Event, EventType
 from ..service import ChatService, Emit
@@ -113,12 +114,13 @@ class VoicePipeline:
                     first_capture = False
                     if wav is None:
                         break  # silence — back to wake word
+                    speech_end = time.perf_counter()
                     self.state = "thinking"
                     text = await transcribe(wav)
                     await self._emit(EventType.TRANSCRIBED, session_id, text=text)
                     if not text:
                         break
-                    await self._turn(session_id, text, wake, speaker)
+                    await self._turn(session_id, text, wake, speaker, speech_end)
                     conversing = continuous
         except asyncio.CancelledError:
             raise
@@ -133,7 +135,12 @@ class VoicePipeline:
             logger.info("Voice pipeline stopped")
 
     async def _turn(
-        self, session_id: str, text: str, wake: WakeWordListener, speaker: Speaker
+        self,
+        session_id: str,
+        text: str,
+        wake: WakeWordListener,
+        speaker: Speaker,
+        speech_end: float | None = None,
     ) -> None:
         tts_enabled = os.environ.get("TTS_ENABLED", "true").lower() in ("true", "1", "yes")
         speaker.reset()
@@ -175,6 +182,11 @@ class VoicePipeline:
                     continue  # drain silently after barge-in
                 if not spoke:
                     self.state = "speaking"
+                    if speech_end is not None:
+                        logger.info(
+                            "Voice latency: %.0fms end-of-speech -> first audio",
+                            (time.perf_counter() - speech_end) * 1000,
+                        )
                     await self._emit(EventType.SPEAKING, session_id)
                     spoke = True
                 await speaker.speak(sentence)

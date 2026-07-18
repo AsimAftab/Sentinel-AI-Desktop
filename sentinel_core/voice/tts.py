@@ -22,6 +22,16 @@ ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # 
 ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
 PCM_RATE = 22050
 
+# Persistent client: connection reuse trims a TLS handshake off every sentence.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=30)
+    return _client
+
 
 class Speaker:
     """One PyAudio output stream reused across sentences; cancel() stops mid-chunk."""
@@ -97,19 +107,18 @@ class Speaker:
             f"?output_format=pcm_{PCM_RATE}"
         )
         stream = self._output_stream()
-        async with httpx.AsyncClient(timeout=30) as client:
-            async with client.stream(
-                "POST",
-                url,
-                headers={"xi-api-key": api_key},
-                json={"text": text, "model_id": ELEVEN_MODEL},
-            ) as response:
-                response.raise_for_status()
-                async for chunk in response.aiter_bytes(chunk_size=2048):
-                    if self._cancel.is_set():
-                        return False
-                    # PyAudio write blocks briefly; run off-loop to keep events flowing.
-                    await asyncio.to_thread(stream.write, chunk)
+        async with _get_client().stream(
+            "POST",
+            url,
+            headers={"xi-api-key": api_key},
+            json={"text": text, "model_id": ELEVEN_MODEL},
+        ) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes(chunk_size=2048):
+                if self._cancel.is_set():
+                    return False
+                # PyAudio write blocks briefly; run off-loop to keep events flowing.
+                await asyncio.to_thread(stream.write, chunk)
         return not self._cancel.is_set()
 
     def _speak_pyttsx3(self, text: str) -> bool:
