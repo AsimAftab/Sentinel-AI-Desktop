@@ -32,12 +32,21 @@ def _models_dir() -> Path:
 
 
 def _resolve_model() -> str:
-    """A custom .onnx path from WAKEWORD_MODEL, or the downloaded pretrained model."""
+    """Custom model beats default: WAKEWORD_MODEL env, else any user-dropped
+    .onnx in data_dir/wakeword-models (e.g. a Colab-trained sentinel.onnx),
+    else the downloaded pretrained "Hey Jarvis"."""
     override = os.environ.get("WAKEWORD_MODEL")
     if override:
         if not Path(override).exists():
             raise FileNotFoundError(f"WAKEWORD_MODEL not found: {override}")
         return override
+
+    custom = sorted(
+        f for f in _models_dir().glob("*.onnx") if f.stem != DEFAULT_MODEL
+    )
+    if custom:
+        logger.info("Using custom wake-word model: %s", custom[0].name)
+        return str(custom[0])
 
     import openwakeword.utils
 
