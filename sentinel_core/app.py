@@ -181,6 +181,81 @@ async def voice_status():
     return {"running": bool(voice and voice.running), "state": voice.state if voice else "idle"}
 
 
+@app.get("/system/apps")
+async def installed_apps():
+    """Installed/startable apps via Get-StartApps (for the Workspaces picker)."""
+    import asyncio as _asyncio
+    import json as _json
+    import subprocess
+
+    def _run() -> list[dict]:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        apps = _json.loads(result.stdout or "[]")
+        if isinstance(apps, dict):
+            apps = [apps]
+        return [{"name": a["Name"], "app_id": a["AppID"]} for a in apps]
+
+    try:
+        return sorted(await _asyncio.to_thread(_run), key=lambda a: a["name"].lower())
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Could not enumerate apps: {exc}") from exc
+
+
+class WorkspaceUpdate(BaseModel):
+    apps: list[dict]
+    urls: list[str] = []
+
+
+@app.get("/workspaces")
+async def get_workspaces():
+    from .workspaces import load_workspaces
+
+    return load_workspaces()
+
+
+@app.put("/workspaces/{name}")
+async def put_workspace(name: str, update: WorkspaceUpdate):
+    from .workspaces import load_workspaces, save_workspaces
+
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "Workspace name required")
+    workspaces = load_workspaces()
+    workspaces[name] = {"apps": update.apps, "urls": update.urls}
+    save_workspaces(workspaces)
+    return workspaces
+
+
+@app.delete("/workspaces/{name}")
+async def delete_workspace(name: str):
+    from .workspaces import load_workspaces, save_workspaces
+
+    workspaces = load_workspaces()
+    if name in workspaces:
+        del workspaces[name]
+        save_workspaces(workspaces)
+    return workspaces
+
+
+@app.post("/workspaces/{name}/open")
+async def open_workspace(name: str):
+    try:
+        result = await app.state.chat.invoke_mcp_tool("workspace_open", {"name": name})
+        return {"result": result}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, str(exc)) from exc
+
+
 @app.get("/sessions/{session_id}/messages")
 async def session_messages(session_id: str):
     return app.state.store.get_messages(session_id, limit=200)

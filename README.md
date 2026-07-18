@@ -38,7 +38,8 @@ accounts, no cloud database.
 | 📅 **Meeting** | Google Meet and Calendar | 5 |
 | ✉️ **Email** | Gmail: read, search, draft, send | 5 |
 | 📝 **Notes** | Local notes (SQLite) | 6 |
-| ⚙️ **System** | Volume, brightness, apps, windows, media keys, screenshots, power | 15 |
+| 📁 **Files** | Browse, tree view, find, open, and read files; Downloads/Documents/etc. | 8 |
+| ⚙️ **System** | Volume, brightness, WiFi/Bluetooth, apps, workspaces, clipboard, wallpaper, windows, media keys, screenshots, power | 27 |
 
 The System agent's tools come from **[`mcp-windows/`](mcp-windows/)** — a
 standalone [MCP](https://modelcontextprotocol.io) server built on real OS APIs

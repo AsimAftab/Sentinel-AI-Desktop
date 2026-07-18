@@ -26,4 +26,30 @@ export const api = {
   voiceStart: () => request<{ running: boolean; state: string }>("/voice/start", { method: "POST" }),
   voiceStop: () => request<{ running: boolean }>("/voice/stop", { method: "POST" }),
   voiceStatus: () => request<{ running: boolean; state: string }>("/voice/status"),
+
+  listApps: () => request<InstalledApp[]>("/system/apps"),
+  getWorkspaces: () => request<Record<string, Workspace>>("/workspaces"),
+  saveWorkspace: (name: string, workspace: Workspace) =>
+    request<Record<string, Workspace>>(`/workspaces/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(workspace),
+    }),
+  deleteWorkspace: (name: string) =>
+    request<Record<string, Workspace>>(`/workspaces/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  openWorkspace: (name: string) =>
+    request<{ result: string }>(`/workspaces/${encodeURIComponent(name)}/open`, {
+      method: "POST",
+    }),
 };
+
+export interface InstalledApp {
+  name: string;
+  app_id: string;
+}
+
+export interface Workspace {
+  apps: InstalledApp[];
+  urls: string[];
+}

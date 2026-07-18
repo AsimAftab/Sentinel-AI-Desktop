@@ -17,13 +17,15 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
 import tempfile
-import time
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import psutil
 from mcp.server.fastmcp import FastMCP
@@ -125,6 +127,34 @@ def _get_start_apps() -> list[dict[str, str]]:
         for a in data
         if a.get("Name") and a.get("AppID")
     ]
+
+
+def _resolve_start_app(
+    name: str, apps: list[dict[str, str]] | None = None
+) -> tuple[dict[str, str] | None, str]:
+    """Resolve an app name against Get-StartApps (exact match, then substring).
+
+    Returns (app, "") on a unique match, or (None, error_message) otherwise.
+    """
+    name = name.strip()
+    if not name or not APP_NAME_RE.match(name):
+        return None, "Error: app name contains invalid characters."
+    if apps is None:
+        apps = _get_start_apps()
+    lname = name.lower()
+    exact = [a for a in apps if a["Name"].lower() == lname]
+    matches = exact or [a for a in apps if lname in a["Name"].lower()]
+    if not matches:
+        return None, f"No app found matching '{name}'. Try list_apps to see options."
+    if len(matches) > 1:
+        names = ", ".join(a["Name"] for a in matches[:8])
+        return None, f"Ambiguous name '{name}'. Did you mean one of: {names}?"
+    return matches[0], ""
+
+
+def _launch_app_id(app_id: str) -> None:
+    """Launch an app by its shell AppID via Explorer (same as the Start menu)."""
+    subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
 
 
 def _enum_visible_windows() -> list[tuple[int, str]]:
@@ -280,23 +310,10 @@ def list_apps(query: str = "") -> str:
 def launch_app(name: str) -> str:
     """Launch an installed app by name (exact match preferred, then substring)."""
     try:
-        name = name.strip()
-        if not name or not APP_NAME_RE.match(name):
-            return "Error: app name contains invalid characters."
-
-        apps = _get_start_apps()
-        lname = name.lower()
-        exact = [a for a in apps if a["Name"].lower() == lname]
-        matches = exact or [a for a in apps if lname in a["Name"].lower()]
-
-        if not matches:
-            return f"No app found matching '{name}'. Try list_apps to see options."
-        if len(matches) > 1:
-            names = ", ".join(a["Name"] for a in matches[:8])
-            return f"Ambiguous name '{name}'. Did you mean one of: {names}?"
-
-        app = matches[0]
-        subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app['AppID']}"])
+        app, error = _resolve_start_app(name)
+        if app is None:
+            return error
+        _launch_app_id(app["AppID"])
         return f"Launched {app['Name']}."
     except Exception as e:
         logger.exception("launch_app failed")
@@ -464,6 +481,124 @@ def power_action(
     except Exception as e:
         logger.exception("power_action failed")
         return f"Error performing power action: {e}"
+
+
+# --- Clipboard ---
+
+
+@mcp.tool()
+def clipboard_read() -> str:
+    """Read the current text content of the clipboard."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return f"Error reading clipboard: {result.stderr.strip()[:200]}"
+        text = result.stdout
+        if not text.strip():
+            return "Clipboard is empty (or contains non-text content)."
+        if len(text) > 8000:
+            return f"{text[:8000]}\n…[truncated: clipboard has {len(text)} characters]"
+        return text
+    except Exception as e:
+        logger.exception("clipboard_read failed")
+        return f"Error reading clipboard: {e}"
+
+
+@mcp.tool()
+def clipboard_write(text: str) -> str:
+    """Copy the given text to the clipboard."""
+    try:
+        # Text is passed via stdin — never interpolated into the command string.
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+            ],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return f"Error writing clipboard: {result.stderr.strip()[:200]}"
+        return f"Copied {len(text)} characters to the clipboard."
+    except Exception as e:
+        logger.exception("clipboard_write failed")
+        return f"Error writing clipboard: {e}"
+
+
+# --- URL / wallpaper / recycle bin ---
+
+
+@mcp.tool()
+def open_url(url: str) -> str:
+    """Open an http/https URL in the default browser."""
+    try:
+        url = url.strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return "Error: only http:// and https:// URLs are allowed."
+        os.startfile(url)  # noqa: S606 - opens in default browser
+        return f"Opened {url} in the default browser."
+    except Exception as e:
+        logger.exception("open_url failed")
+        return f"Error opening URL: {e}"
+
+
+@mcp.tool()
+def set_wallpaper(image_path: str) -> str:
+    """Set the desktop wallpaper to a local jpg/jpeg/png/bmp image."""
+    SPI_SETDESKWALLPAPER = 0x0014
+    SPIF_UPDATEINIFILE_SENDCHANGE = 3
+    try:
+        path = Path(os.path.expandvars(os.path.expanduser(image_path.strip()))).absolute()
+        if not path.is_file():
+            return f"Error: image file does not exist: {path}"
+        if path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".bmp"):
+            return "Error: wallpaper must be a .jpg, .jpeg, .png, or .bmp file."
+        ok = ctypes.windll.user32.SystemParametersInfoW(
+            SPI_SETDESKWALLPAPER, 0, str(path), SPIF_UPDATEINIFILE_SENDCHANGE
+        )
+        if not ok:
+            return "Error: SystemParametersInfoW call failed."
+        return f"Wallpaper set to {path.name}."
+    except Exception as e:
+        logger.exception("set_wallpaper failed")
+        return f"Error setting wallpaper: {e}"
+
+
+@mcp.tool()
+def empty_recycle_bin(confirm: bool = False) -> str:
+    """Empty the Recycle Bin. Requires confirm=true to execute."""
+    SHERB_NOCONFIRMATION_NOSOUND = 0x1 | 0x4
+    ALREADY_EMPTY_RESULTS = {-2147418113, 0x8000FFFF, -2147024894, 0x80070002}
+    try:
+        if not confirm:
+            return "Pass confirm=true to actually empty the Recycle Bin."
+        result = ctypes.windll.shell32.SHEmptyRecycleBinW(
+            None, None, SHERB_NOCONFIRMATION_NOSOUND
+        )
+        if result == 0:
+            return "Recycle Bin emptied."
+        if result in ALREADY_EMPTY_RESULTS:
+            return "Recycle Bin is already empty."
+        return f"Error: SHEmptyRecycleBinW returned HRESULT {result:#010x}."
+    except Exception as e:
+        logger.exception("empty_recycle_bin failed")
+        return f"Error emptying Recycle Bin: {e}"
+
+
+# --- Tool modules ---
+
+# Imported for their @mcp.tool() registrations (they import `mcp` from this module).
+from . import files, radios, workspaces  # noqa: E402,F401
 
 
 def main() -> None:

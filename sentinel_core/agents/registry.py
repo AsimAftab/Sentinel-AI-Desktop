@@ -29,13 +29,18 @@ class AgentDefinition:
 
 @dataclass(frozen=True)
 class MCPAgentDefinition:
-    """An agent whose tools come from an MCP server (spawned once, kept alive)."""
+    """An agent whose tools come from an MCP server (spawned once, kept alive).
+
+    tool_prefixes: claim only tools whose names start with one of these;
+    None = catch-all for the server's tools no other agent claimed.
+    """
 
     name: str
     description: str
     server_name: str
     command: str
     args: tuple[str, ...]
+    tool_prefixes: tuple[str, ...] | None = None
 
 
 def _windows_mcp_command() -> tuple[str, tuple[str, ...]]:
@@ -56,10 +61,22 @@ _mcp_cmd, _mcp_args = _windows_mcp_command()
 
 MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     MCPAgentDefinition(
+        name="Files",
+        description="File navigation on this PC: list folders, show directory "
+        "trees, find files by name, open files or folders, read text files, "
+        "resolve Downloads/Documents/Desktop and other user folders.",
+        server_name="windows",
+        command=_mcp_cmd,
+        args=_mcp_args,
+        tool_prefixes=("fs_",),
+    ),
+    MCPAgentDefinition(
         name="System",
-        description="Windows system control: volume, brightness, media playback, "
-        "launching and closing apps, window focus, screenshots, system info, "
-        "lock screen and power actions.",
+        description="Windows system control: volume, brightness, WiFi and "
+        "Bluetooth toggles, media playback, launching and closing apps, "
+        "workspaces (named app groups like 'dev mode'), window focus, "
+        "clipboard, wallpaper, screenshots, system info, recycle bin, lock "
+        "screen and power actions.",
         server_name="windows",
         command=_mcp_cmd,
         args=_mcp_args,

@@ -159,9 +159,7 @@ async def transcribe(wav_bytes: bytes) -> str:
         )
         response.raise_for_status()
         text = response.json().get("text", "").strip()
-        logger.info(
-            "Transcribed in %.0fms: %r", (time.perf_counter() - start) * 1000, text[:120]
-        )
+        logger.info("Transcribed in %.0fms: %r", (time.perf_counter() - start) * 1000, text[:120])
         return text
     except Exception:
         logger.exception("Groq transcription failed")
