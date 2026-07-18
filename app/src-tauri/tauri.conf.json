@@ -26,15 +26,28 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "licenseFile": "LICENSE.txt",
-    "resources": ["binaries/sentinel-core"],
+    "resources": [
+      "binaries/sentinel-core"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCODIzQ0ExODVERjQwMkQKUldRdFFOK0ZvVHlDTzZrOHE5eWFTcjNRb09vdFdXV29IaVRhUWhaYU9rWGdmVVAyTERrMFZlRm4K",
+      "endpoints": [
+        "https://github.com/AsimAftab/Sentinel-AI-Desktop/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
