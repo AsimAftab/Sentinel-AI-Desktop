@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 # Fallback preference: fast OpenAI-compatible clouds first, local last.
 FALLBACK_ORDER = ["groq", "cerebras", "azure", "openai", "zhipu", "ollama"]
 
-# Routing/composition agents don't need the big model — use the provider's fast
-# tier for snappier voice turns. Only applied when the user hasn't overridden.
-FAST_AGENTS = ("Supervisor", "Responder")
+# The Responder only rephrases — it can ride the provider's fast tier. The
+# Supervisor stays on the primary model: routing quality (context resolution,
+# disambiguation) measurably degrades on the small tier for barely any latency.
+FAST_AGENTS = ("Responder",)
 FAST_MODELS = {"groq": "openai/gpt-oss-20b"}
 
 

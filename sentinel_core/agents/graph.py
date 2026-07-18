@@ -9,6 +9,7 @@ final user-facing answer and is the node whose tokens stream to the UI
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from langchain_core.messages import AIMessage, SystemMessage
@@ -24,6 +25,7 @@ from .registry import AgentDefinition, load_agents
 logger = logging.getLogger(__name__)
 
 MAX_HOPS = 4
+AGENT_TIMEOUT_S = 45
 
 
 class RouteDecision(BaseModel):
@@ -53,6 +55,10 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
         "Rules:\n"
         "- Route to exactly one agent per step; multi-part requests may need "
         "several steps before FINISH.\n"
+        "- Write 'task' self-contained: resolve pronouns, follow-ups, and likely "
+        "speech-to-text misspellings using the conversation (e.g. after "
+        "discussing computer scientists, 'What about Rosevalt?' means "
+        "'Tell me about a person, probably Roosevelt — user said Rosevalt').\n"
         "- If the request is conversational (greeting, opinion, question you "
         "can answer directly), choose FINISH immediately.\n"
         "- If an agent already produced the needed result, choose FINISH.\n"
@@ -74,7 +80,11 @@ def _agent_system_prompt(definition: AgentDefinition, context: str) -> str:
         f"You are the {definition.name} agent of Sentinel, a desktop AI assistant. "
         f"{definition.description} Use your tools to complete the task, then reply "
         "with a concise factual summary of what you did or found. Do not address "
-        "the user directly; your output is consumed by a supervisor."
+        "the user directly; your output is consumed by a supervisor. "
+        "Budget: at most 3 tool calls per task — never repeat a similar call "
+        "hoping for better results. If results are ambiguous (e.g. a likely "
+        "misspelling), go with your best interpretation and say so instead of "
+        "retrying variations."
     )
     if context:
         base += f"\n\n{context}"
@@ -130,7 +140,36 @@ def build_graph(llm: LLMManager, store: Store):
             inputs = list(state["messages"])
             if task:
                 inputs.append(AIMessage(content=f"[Supervisor → {name}] {task}", name="Supervisor"))
-            result = await react_agents[name].ainvoke({"messages": inputs})
+            try:
+                # recursion_limit ~ 4 tool rounds; wait_for stops runaway loops
+                # dead — either way the supervisor still gets something to say.
+                result = await asyncio.wait_for(
+                    react_agents[name].ainvoke(
+                        {"messages": inputs}, {"recursion_limit": 10}
+                    ),
+                    timeout=AGENT_TIMEOUT_S,
+                )
+            except TimeoutError:
+                logger.warning("Agent %s timed out after %ss", name, AGENT_TIMEOUT_S)
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=f"[{name} agent timed out before finishing the task]",
+                            name=name,
+                        )
+                    ]
+                }
+            except Exception as exc:  # noqa: BLE001 — incl. GraphRecursionError
+                logger.warning("Agent %s failed: %s", name, exc)
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=f"[{name} agent could not complete the task: "
+                            f"{type(exc).__name__}]",
+                            name=name,
+                        )
+                    ]
+                }
             final = result["messages"][-1]
             summary = final.content if isinstance(final.content, str) else str(final.content)
             store.add_memory(
