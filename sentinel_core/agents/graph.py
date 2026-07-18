@@ -59,8 +59,12 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
         "speech-to-text misspellings using the conversation (e.g. after "
         "discussing computer scientists, 'What about Rosevalt?' means "
         "'Tell me about a person, probably Roosevelt — user said Rosevalt').\n"
-        "- If the request is conversational (greeting, opinion, question you "
-        "can answer directly), choose FINISH immediately.\n"
+        "- If the request is conversational (greeting, opinion, general "
+        "knowledge), choose FINISH immediately.\n"
+        "- NEVER invent real-time or external facts. Weather, news, prices, "
+        "web lookups, calendar, email, notes, music state, and system state "
+        "MUST come from an agent in this conversation — if none has provided "
+        "it yet, route to the right agent instead of answering.\n"
         "- If an agent already produced the needed result, choose FINISH.\n"
         "- Commands arrive via speech-to-text: if the message looks like a "
         "garbled fragment or mis-transcription (e.g. a few stray words with no "
@@ -71,7 +75,10 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
         "agent results above — no markdown, no bullet lists, no long URLs.\n"
     )
     if context:
-        prompt += f"\n{context}\n"
+        prompt += (
+            "\nBackground from earlier activity (may be STALE — never present "
+            f"it as current fact; re-fetch via an agent if asked again):\n{context}\n"
+        )
     return prompt
 
 

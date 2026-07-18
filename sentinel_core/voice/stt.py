@@ -33,7 +33,7 @@ def _get_recognizer():
         recognizer = sr.Recognizer()
         recognizer.energy_threshold = int(os.environ.get("STT_ENERGY_THRESHOLD", "300"))
         recognizer.dynamic_energy_threshold = True
-        recognizer.pause_threshold = float(os.environ.get("STT_PAUSE_THRESHOLD", "0.6"))
+        recognizer.pause_threshold = float(os.environ.get("STT_PAUSE_THRESHOLD", "0.5"))
         with sr.Microphone() as source:
             recognizer.adjust_for_ambient_noise(source, duration=0.4)
         _recognizer = recognizer

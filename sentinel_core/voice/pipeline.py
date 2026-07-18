@@ -105,7 +105,9 @@ class VoicePipeline:
                 first_capture = True
                 while conversing:
                     self.state = "listening"
-                    await speaker.chime()
+                    # Fire-and-forget: the chime plays while the mic is already
+                    # opening, instead of delaying capture by its duration.
+                    asyncio.create_task(speaker.chime())
                     await self._emit(EventType.LISTENING, session_id)
                     wav = await capture_utterance(timeout=6.0 if first_capture else 4.0)
                     first_capture = False
