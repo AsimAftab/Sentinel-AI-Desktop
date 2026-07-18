@@ -41,8 +41,10 @@ def _resolve_model() -> str:
             raise FileNotFoundError(f"WAKEWORD_MODEL not found: {override}")
         return override
 
+    # openWakeWord's feature-extraction models share this folder — not wake words.
+    infrastructure = {DEFAULT_MODEL, "embedding_model", "melspectrogram", "silero_vad"}
     custom = sorted(
-        f for f in _models_dir().glob("*.onnx") if f.stem != DEFAULT_MODEL
+        f for f in _models_dir().glob("*.onnx") if f.stem not in infrastructure
     )
     if custom:
         logger.info("Using custom wake-word model: %s", custom[0].name)
