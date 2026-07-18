@@ -49,31 +49,54 @@ class ChatService:
             self._mcp_agents = None
 
     async def _load_mcp_agents(self) -> list:
-        """Spawn registered MCP servers once and wrap their tools as agents."""
+        """Spawn each registered MCP server once and split its tools by agent.
+
+        Agents with tool_prefixes claim matching tools; catch-all agents
+        (tool_prefixes=None) receive the server's remaining tools.
+        """
         if self._mcp_agents is not None:
             return self._mcp_agents
         from .agents.registry import MCP_AGENT_REGISTRY, AgentDefinition
 
         loaded = []
         self._mcp_stack = self._mcp_stack or AsyncExitStack()
-        for definition in MCP_AGENT_REGISTRY:
-            try:
-                from langchain_mcp_adapters.client import MultiServerMCPClient
-                from langchain_mcp_adapters.tools import load_mcp_tools
+        self._mcp_sessions: dict[str, object] = {}
+        server_tools: dict[str, list] = {}
 
-                client = MultiServerMCPClient(
-                    {
-                        definition.server_name: {
-                            "command": definition.command,
-                            "args": list(definition.args),
-                            "transport": "stdio",
+        for definition in MCP_AGENT_REGISTRY:
+            server = definition.server_name
+            if server not in server_tools:
+                try:
+                    from langchain_mcp_adapters.client import MultiServerMCPClient
+                    from langchain_mcp_adapters.tools import load_mcp_tools
+
+                    client = MultiServerMCPClient(
+                        {
+                            server: {
+                                "command": definition.command,
+                                "args": list(definition.args),
+                                "transport": "stdio",
+                            }
                         }
-                    }
-                )
-                session = await self._mcp_stack.enter_async_context(
-                    client.session(definition.server_name)
-                )
-                tools = await load_mcp_tools(session)
+                    )
+                    session = await self._mcp_stack.enter_async_context(client.session(server))
+                    self._mcp_sessions[server] = session
+                    server_tools[server] = await load_mcp_tools(session)
+                except Exception as exc:  # noqa: BLE001 — missing server must not sink the service
+                    logger.warning("MCP server %s unavailable: %s", server, exc)
+                    server_tools[server] = []
+
+        claimed: dict[str, set[str]] = {}
+        for definition in MCP_AGENT_REGISTRY:
+            if definition.tool_prefixes is None:
+                continue
+            tools = [
+                t
+                for t in server_tools[definition.server_name]
+                if t.name.startswith(definition.tool_prefixes)
+            ]
+            claimed.setdefault(definition.server_name, set()).update(t.name for t in tools)
+            if tools:
                 loaded.append(
                     (
                         AgentDefinition(name=definition.name, description=definition.description),
@@ -81,10 +104,34 @@ class ChatService:
                     )
                 )
                 logger.info("MCP agent %s ready (%d tools)", definition.name, len(tools))
-            except Exception as exc:  # noqa: BLE001 — missing server must not sink the service
-                logger.warning("Skipping MCP agent %s: %s", definition.name, exc)
+
+        for definition in MCP_AGENT_REGISTRY:
+            if definition.tool_prefixes is not None:
+                continue
+            taken = claimed.get(definition.server_name, set())
+            tools = [t for t in server_tools[definition.server_name] if t.name not in taken]
+            if tools:
+                loaded.append(
+                    (
+                        AgentDefinition(name=definition.name, description=definition.description),
+                        tools,
+                    )
+                )
+                logger.info("MCP agent %s ready (%d tools)", definition.name, len(tools))
+
         self._mcp_agents = loaded
         return loaded
+
+    async def invoke_mcp_tool(self, tool_name: str, args: dict) -> str:
+        """Directly invoke an MCP tool by name (used by REST endpoints, e.g.
+        launching a workspace from the GUI without an LLM in the loop)."""
+        await self._ensure_graph()
+        for _definition, tools in self._mcp_agents or []:
+            for tool in tools:
+                if tool.name == tool_name:
+                    result = await tool.ainvoke(args)
+                    return str(result)
+        raise ValueError(f"MCP tool not available: {tool_name}")
 
     async def _ensure_graph(self):
         if self._graph is None:

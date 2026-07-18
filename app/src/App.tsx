@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
-import { DownloadCloud, MessageSquare, Plug, ScrollText, Settings as SettingsIcon, Shield } from "lucide-react";
+import { DownloadCloud, Layers, MessageSquare, Plug, ScrollText, Settings as SettingsIcon, Shield } from "lucide-react";
 import { useSentinel } from "./state/store";
 import { Badge } from "./components/ui";
 import { checkForUpdate, type UpdateInfo } from "./lib/updater";
 import HomeView from "./views/Home";
 import SettingsView from "./views/Settings";
 import ConnectionsView from "./views/Connections";
+import WorkspacesView from "./views/Workspaces";
 import LogsView from "./views/Logs";
 import "./index.css";
 
-type View = "home" | "connections" | "settings" | "logs";
+type View = "home" | "workspaces" | "connections" | "settings" | "logs";
 
 const NAV: { id: View; label: string; icon: typeof MessageSquare }[] = [
   { id: "home", label: "Assistant", icon: MessageSquare },
+  { id: "workspaces", label: "Workspaces", icon: Layers },
   { id: "connections", label: "Connections", icon: Plug },
   { id: "settings", label: "Settings", icon: SettingsIcon },
   { id: "logs", label: "Activity Log", icon: ScrollText },
@@ -94,6 +96,7 @@ export default function App() {
 
       <main className="min-w-0 flex-1">
         {view === "home" && <HomeView />}
+        {view === "workspaces" && <WorkspacesView />}
         {view === "connections" && <ConnectionsView />}
         {view === "settings" && <SettingsView />}
         {view === "logs" && <LogsView />}

@@ -73,6 +73,11 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
         "- When you choose FINISH, also write the final reply in 'response': "
         "concise, natural, speakable prose based on the conversation and any "
         "agent results above — no markdown, no bullet lists, no long URLs.\n"
+        "- Exception: when an agent returned verbatim structured output the "
+        "user asked to see (a directory tree, listing, or file contents), "
+        "copy it into 'response' EXACTLY as the agent gave it, character for "
+        "character, with only a short intro sentence — altering or inventing "
+        "entries is data corruption.\n"
     )
     if context:
         prompt += (
@@ -91,7 +96,10 @@ def _agent_system_prompt(definition: AgentDefinition, context: str) -> str:
         "Budget: at most 3 tool calls per task — never repeat a similar call "
         "hoping for better results. If results are ambiguous (e.g. a likely "
         "misspelling), go with your best interpretation and say so instead of "
-        "retrying variations."
+        "retrying variations. When a tool returns structured output the user "
+        "asked to see (directory trees, listings, file contents, tables), "
+        "include it VERBATIM in your reply — never abbreviate, paraphrase, or "
+        "invent entries."
     )
     if context:
         base += f"\n\n{context}"
