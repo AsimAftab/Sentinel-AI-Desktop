@@ -67,6 +67,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Sentinel Core", version=__version__, lifespan=lifespan)
 
+# The desktop app's webview calls us cross-origin (vite dev server / tauri://).
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "tauri://localhost",
+        "https://tauri.localhost",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class ChatRequest(BaseModel):
     text: str
