@@ -1,0 +1,65 @@
+name: Release
+
+# Push a tag like v0.3.0 to build the full stack and publish a signed release
+# with updater artifacts (latest.json) that installed apps poll.
+#
+# Required repo secret: TAURI_SIGNING_PRIVATE_KEY (contents of the private key
+# generated with `tauri signer generate`; password empty).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Freeze core service
+        working-directory: packaging
+        run: uv run --group core --group package pyinstaller sentinel-core.spec --noconfirm
+
+      - name: Freeze Windows MCP server
+        working-directory: mcp-windows
+        run: >
+          uv run --with pyinstaller pyinstaller --onefile --name sentinel-mcp-windows
+          --console --collect-data screen_brightness_control
+          src/sentinel_mcp_windows/server.py --distpath dist --noconfirm
+
+      - name: Assemble sidecar resources
+        shell: bash
+        run: |
+          cp mcp-windows/dist/sentinel-mcp-windows.exe packaging/dist/sentinel-core/
+          mkdir -p app/src-tauri/binaries
+          cp -r packaging/dist/sentinel-core app/src-tauri/binaries/
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "Sentinel AI ${{ github.ref_name }}"
+          releaseDraft: true
+          includeUpdaterJson: true

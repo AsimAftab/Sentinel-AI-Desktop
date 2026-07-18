@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { MessageSquare, Plug, ScrollText, Settings as SettingsIcon, Shield } from "lucide-react";
+import { DownloadCloud, MessageSquare, Plug, ScrollText, Settings as SettingsIcon, Shield } from "lucide-react";
 import { useSentinel } from "./state/store";
 import { Badge } from "./components/ui";
+import { checkForUpdate, type UpdateInfo } from "./lib/updater";
 import HomeView from "./views/Home";
 import SettingsView from "./views/Settings";
 import ConnectionsView from "./views/Connections";
@@ -19,10 +20,13 @@ const NAV: { id: View; label: string; icon: typeof MessageSquare }[] = [
 
 export default function App() {
   const [view, setView] = useState<View>("home");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [installing, setInstalling] = useState(false);
   const { connect, connected, coreVersion, voice } = useSentinel();
 
   useEffect(() => {
     connect();
+    checkForUpdate().then(setUpdate);
   }, [connect]);
 
   return (
@@ -55,6 +59,19 @@ export default function App() {
           ))}
         </nav>
 
+        {update && (
+          <button
+            onClick={() => {
+              setInstalling(true);
+              update.install().catch(() => setInstalling(false));
+            }}
+            disabled={installing}
+            className="mx-3 mb-2 flex items-center gap-2 rounded-lg bg-accent/15 px-3 py-2.5 text-left text-xs font-medium text-accent-2 transition-colors hover:bg-accent/25 disabled:opacity-60"
+          >
+            <DownloadCloud size={14} className={installing ? "animate-bounce" : ""} />
+            {installing ? "Installing update…" : `Update to v${update.version}`}
+          </button>
+        )}
         <div className="border-t border-edge px-4 py-3.5">
           {connected ? (
             <Badge tone="ok">
