@@ -11,17 +11,44 @@ from __future__ import annotations
 import importlib
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @dataclass(frozen=True)
 class AgentDefinition:
     name: str
     description: str
-    tools_module: str
+    tools_module: str = ""
     tools_attr: str = "TOOLS"
     system_prompt: str | None = None
+
+
+@dataclass(frozen=True)
+class MCPAgentDefinition:
+    """An agent whose tools come from an MCP server (spawned once, kept alive)."""
+
+    name: str
+    description: str
+    server_name: str
+    command: str
+    args: tuple[str, ...]
+
+
+MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
+    MCPAgentDefinition(
+        name="System",
+        description="Windows system control: volume, brightness, media playback, "
+        "launching and closing apps, window focus, screenshots, system info, "
+        "lock screen and power actions.",
+        server_name="windows",
+        command="uv",
+        args=("run", "--project", str(REPO_ROOT / "mcp-windows"), "sentinel-mcp-windows"),
+    ),
+]
 
 
 AGENT_REGISTRY: list[AgentDefinition] = [

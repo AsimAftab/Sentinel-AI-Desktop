@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
     yield
     if app.state.voice is not None:
         await app.state.voice.stop()
+    await app.state.chat.aclose()
     store.close()
 
 
@@ -122,13 +123,13 @@ async def get_settings():
 async def put_settings(update: SettingsUpdate):
     store: Store = app.state.store
     store.save_settings_overrides(update.overrides)
-    app.state.chat.reload(load_settings(store))
+    await app.state.chat.reload(load_settings(store))
     return _redacted_settings(app)
 
 
 @app.post("/settings/reload")
 async def reload_settings():
-    app.state.chat.reload(load_settings(app.state.store))
+    await app.state.chat.reload(load_settings(app.state.store))
     return {"reloaded": True}
 
 
@@ -145,7 +146,7 @@ async def put_secret(update: SecretUpdate):
     if update.name not in allowed:
         raise HTTPException(400, f"Unknown secret name: {update.name}")
     set_secret(update.name, update.value)
-    app.state.chat.reload(load_settings(app.state.store))
+    await app.state.chat.reload(load_settings(app.state.store))
     return {"saved": update.name}
 
 

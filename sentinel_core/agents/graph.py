@@ -91,9 +91,13 @@ def _agent_system_prompt(definition: AgentDefinition, context: str) -> str:
     return base
 
 
-def build_graph(llm: LLMManager, store: Store):
-    """Build and compile the agent graph from the registry. Called lazily."""
-    loaded = load_agents()
+def build_graph(llm: LLMManager, store: Store, extra_agents=None):
+    """Build and compile the agent graph from the registry. Called lazily.
+
+    extra_agents: pre-loaded (AgentDefinition, tools) pairs — e.g. MCP-backed
+    agents whose tools were loaded asynchronously by the caller.
+    """
+    loaded = load_agents() + list(extra_agents or [])
     agents = [d for d, _ in loaded]
     valid_targets = {d.name for d in agents} | {"FINISH"}
 
@@ -144,9 +148,7 @@ def build_graph(llm: LLMManager, store: Store):
                 # recursion_limit ~ 4 tool rounds; wait_for stops runaway loops
                 # dead — either way the supervisor still gets something to say.
                 result = await asyncio.wait_for(
-                    react_agents[name].ainvoke(
-                        {"messages": inputs}, {"recursion_limit": 10}
-                    ),
+                    react_agents[name].ainvoke({"messages": inputs}, {"recursion_limit": 10}),
                     timeout=AGENT_TIMEOUT_S,
                 )
             except TimeoutError:

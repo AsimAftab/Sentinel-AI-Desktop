@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -31,14 +32,63 @@ class ChatService:
         self.store = store
         self.llm = LLMManager(settings)
         self._graph = None
+        self._mcp_stack: AsyncExitStack | None = None
+        self._mcp_agents: list | None = None
 
-    def reload(self, settings: Settings) -> None:
+    async def reload(self, settings: Settings) -> None:
         self.llm.reload(settings)
         self._graph = None  # rebuilt lazily with the new providers
 
-    def _get_graph(self):
+    async def aclose(self) -> None:
+        if self._mcp_stack is not None:
+            try:
+                await self._mcp_stack.aclose()
+            except Exception:  # noqa: BLE001 — dying MCP subprocesses at shutdown
+                logger.debug("MCP stack close failed", exc_info=True)
+            self._mcp_stack = None
+            self._mcp_agents = None
+
+    async def _load_mcp_agents(self) -> list:
+        """Spawn registered MCP servers once and wrap their tools as agents."""
+        if self._mcp_agents is not None:
+            return self._mcp_agents
+        from .agents.registry import MCP_AGENT_REGISTRY, AgentDefinition
+
+        loaded = []
+        self._mcp_stack = self._mcp_stack or AsyncExitStack()
+        for definition in MCP_AGENT_REGISTRY:
+            try:
+                from langchain_mcp_adapters.client import MultiServerMCPClient
+                from langchain_mcp_adapters.tools import load_mcp_tools
+
+                client = MultiServerMCPClient(
+                    {
+                        definition.server_name: {
+                            "command": definition.command,
+                            "args": list(definition.args),
+                            "transport": "stdio",
+                        }
+                    }
+                )
+                session = await self._mcp_stack.enter_async_context(
+                    client.session(definition.server_name)
+                )
+                tools = await load_mcp_tools(session)
+                loaded.append(
+                    (
+                        AgentDefinition(name=definition.name, description=definition.description),
+                        tools,
+                    )
+                )
+                logger.info("MCP agent %s ready (%d tools)", definition.name, len(tools))
+            except Exception as exc:  # noqa: BLE001 — missing server must not sink the service
+                logger.warning("Skipping MCP agent %s: %s", definition.name, exc)
+        self._mcp_agents = loaded
+        return loaded
+
+    async def _ensure_graph(self):
         if self._graph is None:
-            self._graph = build_graph(self.llm, self.store)
+            self._graph = build_graph(self.llm, self.store, await self._load_mcp_agents())
         return self._graph
 
     def _history(self, session_id: str) -> list:
@@ -67,7 +117,7 @@ class ChatService:
         # nesting depth so each agent run emits exactly one started/finished pair.
         depth: dict[str, int] = {}
         try:
-            graph = self._get_graph()
+            graph = await self._ensure_graph()
             async for ev in graph.astream_events(inputs, version="v2"):
                 kind = ev["event"]
                 name = ev.get("name", "")
@@ -127,6 +177,6 @@ class ChatService:
         return final_text
 
     def _agent_names(self) -> set[str]:
-        from .agents.registry import AGENT_REGISTRY
+        from .agents.registry import AGENT_REGISTRY, MCP_AGENT_REGISTRY
 
-        return {d.name for d in AGENT_REGISTRY}
+        return {d.name for d in AGENT_REGISTRY} | {d.name for d in MCP_AGENT_REGISTRY}
