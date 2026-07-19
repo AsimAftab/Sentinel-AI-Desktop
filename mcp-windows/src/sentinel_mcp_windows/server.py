@@ -240,6 +240,29 @@ def set_mute(muted: bool) -> str:
         return f"Error setting mute: {e}"
 
 
+@mcp.tool()
+def adjust_volume(delta: int) -> str:
+    """Adjust the master volume by a relative amount (e.g. +10 louder, -10 quieter)."""
+    try:
+        if not -100 <= delta <= 100:
+            return "Error: delta must be between -100 and 100."
+
+        def _apply():
+            vol = _get_endpoint_volume()
+            current = round(vol.GetMasterVolumeLevelScalar() * 100)
+            new = max(0, min(100, current + delta))
+            vol.SetMasterVolumeLevelScalar(new / 100, None)
+            return current, new
+
+        current, new = _with_com(_apply)
+        if current == new:
+            return f"Volume unchanged at {current}% (already at the limit)."
+        return f"Volume changed from {current}% to {new}%."
+    except Exception as e:
+        logger.exception("adjust_volume failed")
+        return f"Error adjusting volume: {e}"
+
+
 # --- Brightness tools ---
 
 
@@ -397,12 +420,42 @@ def focus_window(title_substring: str) -> str:
             if sub in title.lower():
                 user32 = ctypes.windll.user32
                 user32.ShowWindow(hwnd, SW_RESTORE)
-                user32.SetForegroundWindow(hwnd)
+                # Windows refuses SetForegroundWindow from background processes
+                # (foreground lock). A synthetic Alt press lifts the restriction;
+                # without it this "succeeded" while doing nothing.
+                VK_MENU = 0x12
+                user32.keybd_event(VK_MENU, 0, 0, 0)
+                ok = user32.SetForegroundWindow(hwnd)
+                user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+                if not ok:
+                    return f"Found '{title}' but Windows refused to bring it forward."
                 return f"Focused window: {title}"
         return f"No visible window found containing '{title_substring}'."
     except Exception as e:
         logger.exception("focus_window failed")
         return f"Error focusing window: {e}"
+
+
+@mcp.tool()
+def window_control(
+    title_substring: str, action: Literal["minimize", "maximize", "restore"]
+) -> str:
+    """Minimize, maximize, or restore the first visible window whose title contains
+    the given substring (case-insensitive)."""
+    SW_MINIMIZE, SW_MAXIMIZE = 6, 3
+    show = {"minimize": SW_MINIMIZE, "maximize": SW_MAXIMIZE, "restore": SW_RESTORE}
+    try:
+        sub = title_substring.strip().lower()
+        if not sub:
+            return "Error: empty title substring."
+        for hwnd, title in _enum_visible_windows():
+            if sub in title.lower():
+                ctypes.windll.user32.ShowWindow(hwnd, show[action])
+                return f"{action.capitalize()}d window: {title}"
+        return f"No visible window found containing '{title_substring}'."
+    except Exception as e:
+        logger.exception("window_control failed")
+        return f"Error controlling window: {e}"
 
 
 # --- System info ---
@@ -607,7 +660,7 @@ def empty_recycle_bin(confirm: bool = False) -> str:
 # --- Tool modules ---
 
 # Imported for their @mcp.tool() registrations (they import `mcp` from this module).
-from . import files, night_light, radios, workspaces  # noqa: E402,F401
+from . import files, night_light, radios, theme, workspaces  # noqa: E402,F401
 
 
 def main() -> None:
