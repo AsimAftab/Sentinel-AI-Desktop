@@ -12,6 +12,7 @@ import logging
 from typing import Callable
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables import Runnable
 
 from .config import PROVIDER_KEY_ENV, ProviderConfig, Settings, get_secret
 
@@ -19,6 +20,17 @@ logger = logging.getLogger(__name__)
 
 # Fallback preference: fast OpenAI-compatible clouds first, local last.
 FALLBACK_ORDER = ["groq", "cerebras", "azure", "openai", "zhipu", "ollama"]
+
+# Same-provider alternate models tried on a rate limit (429) BEFORE switching
+# provider. Groq rate-limits per model, so a sibling model recovers a 429
+# instantly. Only models verified to exist + support tool calling belong here.
+PROVIDER_FALLBACK_MODELS = {
+    "groq": (
+        "llama-3.3-70b-versatile",
+        "openai/gpt-oss-20b",
+        "llama-3.1-8b-instant",
+    ),
+}
 
 # The Responder only rephrases — it can ride the provider's fast tier. The
 # Supervisor stays on the primary model: routing quality (context resolution,
@@ -145,6 +157,62 @@ class LLMManager:
             except Exception as exc:  # noqa: BLE001 — collect and try the next provider
                 errors.append(f"{provider}: {exc}")
         raise RuntimeError("No usable LLM provider. Tried: " + "; ".join(errors))
+
+    def candidates(
+        self, agent: str | None = None, temperature: float | None = None
+    ) -> list[BaseChatModel]:
+        """Ordered models to try for an agent at RUNTIME (rate-limit fallback).
+
+        Unlike ``get()`` (which only guards against *construction* failures like
+        a missing key), this returns every buildable model so callers can chain
+        them with ``.with_fallbacks``/retry and survive a 429 mid-turn: primary
+        model first, then alternate models on the same provider (a 429 is
+        per-model on Groq), then other enabled providers. Unbuildable candidates
+        are skipped; the primary is always first.
+        """
+        temp = self._temperature_for_agent(agent, temperature)
+        preferred = self._provider_for_agent(agent)
+        out: list[BaseChatModel] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(provider: str, model: str | None) -> None:
+            cfg = self._settings.providers.get(provider)
+            if cfg is None or not cfg.enabled:
+                return
+            resolved = model or cfg.resolve_model(provider)
+            if (provider, resolved) in seen:
+                return
+            try:
+                built = self._create(provider, temp, model)
+            except Exception as exc:  # noqa: BLE001 — skip an unusable candidate
+                logger.debug("Fallback candidate %s/%s unusable: %s", provider, resolved, exc)
+                return
+            seen.add((provider, resolved))
+            out.append(built)
+
+        add(preferred, self._model_for_agent(agent, preferred))
+        if self._settings.fallback_enabled:
+            for alt in PROVIDER_FALLBACK_MODELS.get(preferred, ()):
+                add(preferred, alt)
+            for provider in FALLBACK_ORDER:
+                if provider != preferred:
+                    add(provider, None)
+        # Nothing built (e.g. fallback disabled and primary unusable): defer to
+        # get(), which raises the same informative error it always has.
+        return out or [self.get(agent, temperature)]
+
+    def bound(
+        self,
+        agent: str | None,
+        transform: Callable[[BaseChatModel], Runnable],
+        temperature: float | None = None,
+    ) -> Runnable:
+        """Apply ``transform`` (bind tools / structured output / config) to each
+        candidate and chain them with runtime fallbacks, so a rate-limit or
+        transient error on one model transparently retries the next."""
+        runnables = [transform(m) for m in self.candidates(agent, temperature)]
+        head, *tail = runnables
+        return head.with_fallbacks(tail) if tail else head
 
     def validate(self) -> dict[str, str]:
         """Best-effort constructability check per enabled provider (no API calls)."""
