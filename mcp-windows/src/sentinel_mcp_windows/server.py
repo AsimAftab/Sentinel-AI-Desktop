@@ -660,7 +660,7 @@ def empty_recycle_bin(confirm: bool = False) -> str:
 # --- Tool modules ---
 
 # Imported for their @mcp.tool() registrations (they import `mcp` from this module).
-from . import files, night_light, radios, theme, workspaces  # noqa: E402,F401
+from . import bluetooth, files, night_light, radios, theme, workspaces  # noqa: E402,F401
 
 
 def main() -> None:

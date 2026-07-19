@@ -83,7 +83,8 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     MCPAgentDefinition(
         name="System",
         description="Windows system control: volume, brightness, night light, "
-        "dark/light theme, WiFi and Bluetooth toggles, media playback, "
+        "dark/light theme, WiFi and Bluetooth toggles, connecting/disconnecting "
+        "paired Bluetooth devices (headphones, speakers), media playback, "
         "launching and closing apps, minimizing/maximizing windows, "
         "workspaces (named app groups like 'dev mode'), window focus, "
         "clipboard, wallpaper, screenshots, system info, recycle bin, lock "
