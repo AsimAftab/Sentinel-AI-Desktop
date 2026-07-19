@@ -55,3 +55,6 @@ mcp-windows/build/
 mcp-windows/dist/
 mcp-windows/*.spec
 app/src-tauri/binaries/
+
+# playwright-mcp session artifacts
+.playwright-mcp/
