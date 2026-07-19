@@ -14,8 +14,11 @@ uv run --group core --group package pyinstaller sentinel-core.spec --noconfirm
 
 ```bash
 cd mcp-windows
+# Freeze via mcp_entry.py (NOT server.py directly): pointing PyInstaller at
+# server.py collapses the package and its `from . import ...` fails at runtime.
 uv run --with pyinstaller pyinstaller --onefile --name sentinel-mcp-windows --console \
-  --collect-data screen_brightness_control src/sentinel_mcp_windows/server.py \
+  --paths src --collect-submodules sentinel_mcp_windows \
+  --collect-data screen_brightness_control mcp_entry.py \
   --distpath dist --noconfirm
 # → mcp-windows/dist/sentinel-mcp-windows.exe (~25 MB)
 ```
