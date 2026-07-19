@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 MAX_HOPS = 4
 AGENT_TIMEOUT_S = 45
+# Interactive web tasks legitimately take longer than API calls.
+AGENT_TIMEOUTS = {"BrowserActions": 150, "Documents": 150}
 
 
 class RouteDecision(BaseModel):
@@ -102,14 +104,23 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
 
 
 def _agent_system_prompt(definition: AgentDefinition, context: str) -> str:
+    if definition.name in AGENT_TIMEOUTS:
+        budget = (
+            "Multi-step tasks are expected — use as many tool calls as the task "
+            "genuinely needs, but never repeat a failed approach more than twice."
+        )
+    else:
+        budget = (
+            "Budget: at most 3 tool calls per task — never repeat a similar call "
+            "hoping for better results."
+        )
     base = definition.system_prompt or (
         f"{_now_line()} "
         f"You are the {definition.name} agent of Sentinel, a desktop AI assistant. "
         f"{definition.description} Use your tools to complete the task, then reply "
         "with a concise factual summary of what you did or found. Do not address "
         "the user directly; your output is consumed by a supervisor. "
-        "Budget: at most 3 tool calls per task — never repeat a similar call "
-        "hoping for better results. If results are ambiguous (e.g. a likely "
+        f"{budget} If results are ambiguous (e.g. a likely "
         "misspelling), go with your best interpretation and say so instead of "
         "retrying variations. When a tool returns structured output the user "
         "asked to see (directory trees, listings, file contents, tables), "
@@ -178,8 +189,11 @@ def build_graph(llm: LLMManager, store: Store, extra_agents=None):
                 # recursion_limit ~ 4 tool rounds; wait_for stops runaway loops
                 # dead — either way the supervisor still gets something to say.
                 result = await asyncio.wait_for(
-                    react_agents[name].ainvoke({"messages": inputs}, {"recursion_limit": 10}),
-                    timeout=AGENT_TIMEOUT_S,
+                    react_agents[name].ainvoke(
+                        {"messages": inputs},
+                        {"recursion_limit": 24 if name in AGENT_TIMEOUTS else 10},
+                    ),
+                    timeout=AGENT_TIMEOUTS.get(name, AGENT_TIMEOUT_S),
                 )
             except TimeoutError:
                 logger.warning("Agent %s timed out after %ss", name, AGENT_TIMEOUT_S)
