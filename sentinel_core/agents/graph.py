@@ -27,8 +27,14 @@ logger = logging.getLogger(__name__)
 
 MAX_HOPS = 4
 AGENT_TIMEOUT_S = 45
-# Interactive web tasks legitimately take longer than API calls.
-AGENT_TIMEOUTS = {"BrowserActions": 150, "Documents": 150}
+# Interactive/long-running agents legitimately exceed the default timeout.
+AGENT_TIMEOUTS = {
+    "BrowserActions": 150,
+    "Documents": 150,
+    "Computer": 90,
+    "MeetingNotes": 600,  # stopping a long recording transcribes many chunks
+    "Coder": 360,
+}
 
 
 class RouteDecision(BaseModel):

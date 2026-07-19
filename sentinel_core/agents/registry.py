@@ -139,6 +139,35 @@ AGENT_REGISTRY: list[AgentDefinition] = [
         tools_module="sentinel_core.tools.documents",
     ),
     AgentDefinition(
+        name="Computer",
+        description="Operates application windows via accessibility (never "
+        "blind clicks): list a window's buttons and fields, click a button "
+        "by name, type into a field, minimize/maximize/close windows. Use "
+        "when the user asks to operate an app's interface directly.",
+        tools_module="sentinel_core.tools.ui_control",
+    ),
+    AgentDefinition(
+        name="MeetingNotes",
+        description="Record and transcribe meetings or any audio playing on "
+        "this computer: start recording system audio, check status, stop to "
+        "get a transcript saved to a file (then summarize it).",
+        tools_module="sentinel_core.tools.meeting_notes",
+    ),
+    AgentDefinition(
+        name="Coder",
+        description="Software engineering on the user's local code projects "
+        "via Claude Code: answer questions about a codebase, or make code "
+        "changes in a given project folder (may take minutes).",
+        tools_module="sentinel_core.tools.coder",
+    ),
+    AgentDefinition(
+        name="Messenger",
+        description="Telegram messaging through the user's bot: send a "
+        "message to the user's phone, read recent incoming messages, or "
+        "explain setup if unconfigured.",
+        tools_module="sentinel_core.tools.telegram",
+    ),
+    AgentDefinition(
         name="Memory",
         description="Long-term memory: permanently remember facts or "
         "preferences the user asks to remember, recall past conversations "

@@ -213,6 +213,8 @@ async def put_secret(update: SecretUpdate):
         "SPOTIPY_CLIENT_ID",
         "SPOTIPY_CLIENT_SECRET",
         "SPOTIPY_REDIRECT_URI",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
     }
     if update.name not in allowed:
         raise HTTPException(400, f"Unknown secret name: {update.name}")

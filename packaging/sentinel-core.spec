@@ -11,7 +11,9 @@ hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("websockets")
     + collect_submodules("langchain_mcp_adapters")
+    + collect_submodules("pywinauto")
     + [
+        "pyaudiowpatch",
         "pyttsx3.drivers",
         "pyttsx3.drivers.sapi5",
         "comtypes.stream",

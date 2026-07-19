@@ -34,10 +34,19 @@ accounts, no cloud database.
 | Agent | Purpose | Tools |
 |---|---|---|
 | 🌐 **Browser** | Web search (Tavily), weather, news, translation, stocks, Wikipedia | 13 |
+| 🖱️ **BrowserActions** | Drives a real Edge window: click, type, fill forms, multi-step web tasks (Playwright MCP) | 24 |
 | 🎵 **Music** | Spotify playback and discovery | 9 |
 | 📅 **Meeting** | Google Meet and Calendar | 5 |
 | ✉️ **Email** | Gmail: read, search, draft, send | 5 |
 | 📝 **Notes** | Local notes (SQLite) | 6 |
+| ⏰ **Productivity** | Reminders, timers, and recurring routines (morning briefings) | 7 |
+| 📄 **Documents** | Q&A over your PDFs/Word/text files with source citations (local RAG) | 3 |
+| 🧠 **Memory** | Permanent facts, meaning-based recall of past conversations | 3 |
+| 👁️ **Screen** | Sees your screen: describe, read errors, summarize (vision model) | 1 |
+| 🖥️ **Computer** | Operates app windows via accessibility: click buttons by name, type into fields | 4 |
+| 🎧 **MeetingNotes** | Records what plays on your PC → transcript file + summary | 3 |
+| 💻 **Coder** | Answers questions / makes changes in your code projects via Claude Code | 2 |
+| 💬 **Messenger** | Telegram: send messages to your phone, read replies | 3 |
 | 📁 **Files** | Browse, tree view, find, open, and read files; Downloads/Documents/etc. | 8 |
 | ⚙️ **System** | Volume, brightness, WiFi/Bluetooth, apps, workspaces, clipboard, wallpaper, windows, media keys, screenshots, power | 27 |
 
