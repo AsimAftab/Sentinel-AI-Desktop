@@ -27,6 +27,7 @@ No formal test suite: verify against the running service (`/health`, `/chat`, We
 
 ## Commit & PR Conventions
 
-- Feature branches + PRs to `main`; the maintainer merges.
+- Feature branches + PRs to `main`.
+- Verify new dependencies with a live capability test before building on them; verify features end-to-end against the running service before merging.
 - Imperative commit subjects with a short body of concrete changes.
 - No AI attribution (no Co-Authored-By bots, no generated-with footers).

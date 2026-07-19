@@ -133,9 +133,11 @@ Node, or Rust.
 
 ## 🗺️ Roadmap
 
-- [ ] Auto-update (Tauri updater + GitHub Releases)
-- [ ] Custom "Sentinel" wake-word model
-- [ ] Streaming STT (sub-1.5s voice turns)
+- [x] Auto-update (Tauri updater + GitHub Releases) — since v0.3.0
+- [x] Custom "Sentinel" wake-word model — auto-detected from the models folder
+- [x] Voice latency cut (silero-VAD endpointing, persistent connections)
+- [ ] True streaming STT (transcribe while speaking)
+- [ ] Runtime provider failover on rate limits
 - [ ] Crash reporting
 
 ## 📚 More
