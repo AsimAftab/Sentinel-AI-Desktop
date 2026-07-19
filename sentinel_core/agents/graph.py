@@ -18,6 +18,7 @@ from langgraph.graph.message import MessagesState
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
+from .. import embeddings
 from ..llm import LLMManager
 from ..store import Store
 from .registry import AgentDefinition, load_agents
@@ -45,9 +46,16 @@ class GraphState(MessagesState):
     route: dict  # last RouteDecision as dict
 
 
+def _now_line() -> str:
+    from datetime import datetime
+
+    return f"Current local date-time: {datetime.now().strftime('%A, %B %d %Y, %H:%M:%S')}."
+
+
 def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
     lines = "\n".join(f"- {a.name}: {a.description}" for a in agents)
     prompt = (
+        f"{_now_line()}\n"
         "You are the supervisor of Sentinel, a desktop AI assistant. "
         "Decide which specialist agent should act next, or FINISH when the "
         "user's request has been fully handled.\n\n"
@@ -65,7 +73,13 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
         "web lookups, calendar, email, notes, music state, and system state "
         "MUST come from an agent in this conversation — if none has provided "
         "it yet, route to the right agent instead of answering.\n"
-        "- If an agent already produced the needed result, choose FINISH.\n"
+        "- Judge capabilities ONLY by the agent list above. Past refusals or "
+        "failures in memory are outdated — if a matching agent exists now, "
+        "route to it.\n"
+        "- If an agent already produced the needed result, choose FINISH. "
+        "NEVER dispatch the same request to an agent that just reported "
+        "success — that causes duplicate side effects (double timers, "
+        "double emails, double playback).\n"
         "- Commands arrive via speech-to-text: if the message looks like a "
         "garbled fragment or mis-transcription (e.g. a few stray words with no "
         "clear intent), choose FINISH and ask the user to repeat — never route "
@@ -89,6 +103,7 @@ def _supervisor_prompt(agents: list[AgentDefinition], context: str) -> str:
 
 def _agent_system_prompt(definition: AgentDefinition, context: str) -> str:
     base = definition.system_prompt or (
+        f"{_now_line()} "
         f"You are the {definition.name} agent of Sentinel, a desktop AI assistant. "
         f"{definition.description} Use your tools to complete the task, then reply "
         "with a concise factual summary of what you did or found. Do not address "
@@ -189,7 +204,7 @@ def build_graph(llm: LLMManager, store: Store, extra_agents=None):
                 }
             final = result["messages"][-1]
             summary = final.content if isinstance(final.content, str) else str(final.content)
-            store.add_memory(
+            memory_id = store.add_memory(
                 "agent_action",
                 {
                     "input": task,
@@ -200,6 +215,7 @@ def build_graph(llm: LLMManager, store: Store, extra_agents=None):
                 },
                 agent=name,
             )
+            embeddings.index_in_background(store, memory_id, f"{name}: {summary[:500]}")
             return {"messages": [AIMessage(content=summary, name=name)]}
 
         return agent_node

@@ -26,6 +26,9 @@ class EventType(str, Enum):
     RESPONSE = "response"
     TURN_FINISHED = "turn_finished"
 
+    # Proactive
+    REMINDER = "reminder"
+
     # Voice (Phase 2)
     LISTENING_FOR_WAKE_WORD = "listening_for_wake_word"
     WAKE_WORD_DETECTED = "wake_word_detected"

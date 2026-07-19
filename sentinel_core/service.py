@@ -14,6 +14,7 @@ from contextlib import AsyncExitStack
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from . import embeddings
 from .agents.graph import build_graph
 from .config import Settings
 from .events import Event, EventType
@@ -156,7 +157,9 @@ class ChatService:
         await emit(event(EventType.TURN_STARTED, text=text))
         history = self._history(session_id)
         self.store.add_message(session_id, "user", text, turn_id=turn_id)
-        self.store.add_memory("command", {"command": text}, session_id=session_id)
+        memory_id = self.store.add_memory("command", {"command": text}, session_id=session_id)
+        embeddings.index_in_background(self.store, memory_id, text)
+        self.store.turn_context = await self._relevant_context(text)
 
         inputs = {"messages": [*history, HumanMessage(content=text)], "hops": 0, "route": {}}
         final_text = ""
@@ -218,10 +221,30 @@ class ChatService:
         if not final_text:
             final_text = "I wasn't able to produce a response for that."
         self.store.add_message(session_id, "assistant", final_text, turn_id=turn_id)
-        self.store.add_memory("result", {"response": final_text[:500]}, session_id=session_id)
+        result_id = self.store.add_memory(
+            "result", {"response": final_text[:500]}, session_id=session_id
+        )
+        embeddings.index_in_background(self.store, result_id, final_text[:500])
         await emit(event(EventType.RESPONSE, text=final_text))
         await emit(event(EventType.TURN_FINISHED, ok=True))
         return final_text
+
+    async def _relevant_context(self, text: str) -> str:
+        """Semantically relevant older memories for this turn (skips the recent
+        window, which the recency block already covers)."""
+        import time as _time
+
+        try:
+            vector = await embeddings.embed_async(text)
+            results = self.store.semantic_search(vector, limit=4, max_distance=0.85)
+        except Exception:  # noqa: BLE001 — degrade to recency-only context
+            return ""
+        cutoff = _time.time() - 30 * 60
+        older = [r for r in results if r["created_at"] < cutoff]
+        if not older:
+            return ""
+        lines = [self.store._memory_line(r) for r in older]
+        return "[Relevant Memory (older)]\n" + "\n".join(lines)
 
     def _agent_names(self) -> set[str]:
         from .agents.registry import AGENT_REGISTRY, MCP_AGENT_REGISTRY
