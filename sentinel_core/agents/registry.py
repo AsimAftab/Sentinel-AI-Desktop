@@ -108,8 +108,31 @@ AGENT_REGISTRY: list[AgentDefinition] = [
     ),
     AgentDefinition(
         name="Notes",
-        description="Personal notes: create, list, search, update, delete notes.",
+        description="Notepad-style documents the user explicitly writes and "
+        "manages: create, list, search, update, delete notes. NOT for "
+        "'remember that…' facts about the user — those go to Memory.",
         tools_module="sentinel_core.tools.notes",
+    ),
+    AgentDefinition(
+        name="Productivity",
+        description="Reminders, timers and alarms: set a reminder for a time, "
+        "start a countdown timer, list or cancel pending ones. Reminders fire "
+        "as spoken alerts and Windows notifications.",
+        tools_module="sentinel_core.tools.productivity",
+    ),
+    AgentDefinition(
+        name="Memory",
+        description="Long-term memory: permanently remember facts or "
+        "preferences the user asks to remember, recall past conversations "
+        "and stored facts by meaning, forget stored facts on request.",
+        tools_module="sentinel_core.tools.memory",
+    ),
+    AgentDefinition(
+        name="Screen",
+        description="Sees the user's screen: describe what is currently "
+        "visible, read and explain error messages or dialogs, summarize "
+        "on-screen content, answer questions about it.",
+        tools_module="sentinel_core.tools.screen",
     ),
     # System & Productivity agents return in Phase 4 via the Sentinel Windows
     # MCP server (replacing the legacy pyautogui-based system_tools).

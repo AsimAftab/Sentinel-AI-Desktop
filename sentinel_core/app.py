@@ -48,8 +48,42 @@ def load_settings(store: Store) -> Settings:
     return Settings.from_env().apply_overrides(store.get_settings_overrides())
 
 
+async def _reminder_loop(app: FastAPI) -> None:
+    """Fire due reminders: WS event + Windows toast + spoken when voice is on."""
+    import asyncio
+
+    from .notify import toast
+
+    while True:
+        await asyncio.sleep(10)
+        try:
+            for reminder in app.state.store.due_reminders():
+                app.state.store.mark_reminder_fired(reminder["id"])
+                logger.info("Reminder due: %s", reminder["text"])
+                await app.state.hub.broadcast(
+                    Event(
+                        type=EventType.REMINDER,
+                        data={"id": reminder["id"], "text": reminder["text"]},
+                    )
+                )
+                await asyncio.to_thread(toast, "Sentinel reminder", reminder["text"])
+                voice = app.state.voice
+                if voice is not None and voice.running:
+                    from .voice.tts import Speaker
+
+                    speaker = Speaker()
+                    try:
+                        await speaker.speak(f"Reminder: {reminder['text']}")
+                    finally:
+                        speaker.close()
+        except Exception:  # noqa: BLE001 — the loop must survive anything
+            logger.exception("Reminder loop iteration failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     store = Store()
     app.state.store = store
     app.state.chat = ChatService(load_settings(store), store)
@@ -58,8 +92,14 @@ async def lifespan(app: FastAPI):
     pruned = store.prune_memory()
     if pruned:
         logger.info("Pruned %d expired memory rows", pruned)
+    reminder_task = asyncio.create_task(_reminder_loop(app), name="reminders")
+    # Warm the embedding model off the critical path (first run downloads it).
+    from . import embeddings
+
+    asyncio.create_task(asyncio.to_thread(embeddings.warmup), name="embed-warmup")
     logger.info("Sentinel Core %s ready", __version__)
     yield
+    reminder_task.cancel()
     if app.state.voice is not None:
         await app.state.voice.stop()
     await app.state.chat.aclose()

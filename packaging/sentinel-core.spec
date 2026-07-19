@@ -1,7 +1,11 @@
 # PyInstaller spec for the Sentinel Core service (onedir, console-less).
 # Build:  uv run --group package pyinstaller packaging/sentinel-core.spec --noconfirm
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 hiddenimports = (
     collect_submodules("uvicorn")
@@ -23,12 +27,15 @@ datas = (
     + collect_data_files("speech_recognition")  # flac binaries
     + collect_data_files("langchain_core")
     + collect_data_files("langgraph")
+    + collect_data_files("fastembed")  # model registry json
 )
+
+binaries = collect_dynamic_libs("sqlite_vec")  # vec0.dll loadable extension
 
 a = Analysis(
     ["core_entry.py"],
     pathex=[".."],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     excludes=["tkinter", "matplotlib", "PyQt5", "IPython", "pytest"],
