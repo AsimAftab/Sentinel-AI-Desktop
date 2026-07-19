@@ -48,8 +48,34 @@ def load_settings(store: Store) -> Settings:
     return Settings.from_env().apply_overrides(store.get_settings_overrides())
 
 
+async def _run_routine(app: FastAPI, routine: dict) -> None:
+    """Run a routine's prompt through the agents and announce the result."""
+    import asyncio
+
+    from .notify import toast
+
+    session_id = app.state.store.start_session()
+    try:
+        result = await app.state.chat.run_turn(
+            session_id, routine["prompt"], app.state.hub.broadcast
+        )
+        if result:
+            await asyncio.to_thread(toast, f"Sentinel — {routine['name']}", result)
+            voice = app.state.voice
+            if voice is not None and voice.running:
+                from .voice.tts import Speaker
+
+                speaker = Speaker()
+                try:
+                    await speaker.speak(result)
+                finally:
+                    speaker.close()
+    finally:
+        app.state.store.end_session(session_id)
+
+
 async def _reminder_loop(app: FastAPI) -> None:
-    """Fire due reminders: WS event + Windows toast + spoken when voice is on."""
+    """Fire due reminders and routines: WS event + toast + spoken when voice on."""
     import asyncio
 
     from .notify import toast
@@ -57,6 +83,10 @@ async def _reminder_loop(app: FastAPI) -> None:
     while True:
         await asyncio.sleep(10)
         try:
+            for routine in app.state.store.due_routines():
+                app.state.store.mark_routine_run(routine["name"])
+                logger.info("Running routine: %s", routine["name"])
+                asyncio.create_task(_run_routine(app, routine))
             for reminder in app.state.store.due_reminders():
                 app.state.store.mark_reminder_fired(reminder["id"])
                 logger.info("Reminder due: %s", reminder["text"])

@@ -61,6 +61,16 @@ _mcp_cmd, _mcp_args = _windows_mcp_command()
 
 MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     MCPAgentDefinition(
+        name="BrowserActions",
+        description="Drives a real browser window (Edge) to interact with "
+        "websites: open pages, click, type, fill forms, multi-step tasks on "
+        "specific sites. Slower than Browser — use only when the task needs "
+        "actual page interaction, not just information.",
+        server_name="playwright",
+        command="npx",
+        args=("-y", "@playwright/mcp@latest", "--browser", "msedge"),
+    ),
+    MCPAgentDefinition(
         name="Files",
         description="File navigation on this PC: list folders, show directory "
         "trees, find files by name, open files or folders, read text files, "
@@ -115,10 +125,18 @@ AGENT_REGISTRY: list[AgentDefinition] = [
     ),
     AgentDefinition(
         name="Productivity",
-        description="Reminders, timers and alarms: set a reminder for a time, "
-        "start a countdown timer, list or cancel pending ones. Reminders fire "
-        "as spoken alerts and Windows notifications.",
+        description="Reminders, timers, alarms, and recurring routines: set a "
+        "reminder or countdown timer, or schedule a routine (e.g. a 9am daily "
+        "briefing) that runs a prompt through Sentinel and announces the "
+        "result; list or cancel any of them.",
         tools_module="sentinel_core.tools.productivity",
+    ),
+    AgentDefinition(
+        name="Documents",
+        description="Question-answering over the user's own documents (PDF, "
+        "Word, text, markdown): index folders, then search their content by "
+        "meaning and answer with passages citing the source files.",
+        tools_module="sentinel_core.tools.documents",
     ),
     AgentDefinition(
         name="Memory",

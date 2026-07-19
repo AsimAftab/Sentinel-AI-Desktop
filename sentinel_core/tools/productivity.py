@@ -65,6 +65,47 @@ def set_timer(minutes: float, label: str = "Timer") -> str:
 
 
 @tool
+def create_routine(name: str, time_hhmm: str, prompt: str, days: str = "daily") -> str:
+    """Create (or update) a recurring routine: at the given time, Sentinel runs
+    the prompt through its agents and announces the result (toast + spoken).
+
+    Args:
+        name: short handle, e.g. "morning brief".
+        time_hhmm: 24h local time, e.g. "09:00".
+        prompt: what Sentinel should do, e.g. "Summarize today's weather in
+            Mumbai and my next calendar events".
+        days: "daily" or comma-separated weekdays like "mon,tue,wed,thu,fri".
+    """
+    import re
+
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", time_hhmm):
+        return f"Invalid time {time_hhmm!r} — use 24h HH:MM like 09:00 or 17:30."
+    _get_store().add_routine(name.strip(), time_hhmm, prompt.strip(), days.strip().lower())
+    return f'Routine "{name}" will run {days} at {time_hhmm}.'
+
+
+@tool
+def list_routines() -> str:
+    """List all recurring routines with their schedule and prompt."""
+    routines = _get_store().list_routines()
+    if not routines:
+        return "No routines set up."
+    return "\n".join(
+        f'"{r["name"]}" — {r["days"]} at {r["time_hhmm"]}'
+        f'{"" if r["enabled"] else " (disabled)"}: {r["prompt"][:80]}'
+        for r in routines
+    )
+
+
+@tool
+def delete_routine(name: str) -> str:
+    """Delete a recurring routine by name."""
+    if _get_store().delete_routine(name.strip()):
+        return f'Routine "{name}" deleted.'
+    return f'No routine named "{name}" found.'
+
+
+@tool
 def list_reminders() -> str:
     """List all pending reminders and timers with their ids and due times."""
     pending = _get_store().pending_reminders()
@@ -81,4 +122,12 @@ def cancel_reminder(reminder_id: int) -> str:
     return f"No pending reminder #{reminder_id} found."
 
 
-TOOLS = [set_reminder, set_timer, list_reminders, cancel_reminder]
+TOOLS = [
+    set_reminder,
+    set_timer,
+    list_reminders,
+    cancel_reminder,
+    create_routine,
+    list_routines,
+    delete_routine,
+]

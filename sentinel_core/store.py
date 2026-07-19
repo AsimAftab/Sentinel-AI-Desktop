@@ -50,6 +50,23 @@ CREATE TABLE IF NOT EXISTS memory (
     expires_at REAL              -- NULL = permanent (preferences)
 );
 CREATE INDEX IF NOT EXISTS idx_memory_time ON memory(created_at);
+CREATE TABLE IF NOT EXISTS routines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    time_hhmm TEXT NOT NULL,
+    days TEXT NOT NULL DEFAULT 'daily',
+    prompt TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_date TEXT
+);
+CREATE TABLE IF NOT EXISTS doc_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    mtime REAL NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_doc_path ON doc_chunks(path);
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT NOT NULL,
@@ -90,6 +107,9 @@ class Store:
             self._conn.enable_load_extension(False)
             self._conn.execute(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(embedding float[384])"
+            )
+            self._conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS doc_vec USING vec0(embedding float[384])"
             )
             self._conn.commit()
             self._vec_ready = True
@@ -182,6 +202,95 @@ class Store:
     def cancel_reminder(self, reminder_id: int) -> bool:
         cur = self._execute("DELETE FROM reminders WHERE id=? AND fired=0", (reminder_id,))
         return cur.rowcount > 0
+
+    # -- routines -----------------------------------------------------------
+    def add_routine(self, name: str, time_hhmm: str, prompt: str, days: str = "daily") -> None:
+        self._execute(
+            "INSERT INTO routines(name, time_hhmm, days, prompt) VALUES(?,?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET time_hhmm=excluded.time_hhmm, "
+            "days=excluded.days, prompt=excluded.prompt, enabled=1",
+            (name, time_hhmm, days, prompt),
+        )
+
+    def list_routines(self) -> list[dict]:
+        return [dict(r) for r in self._query("SELECT * FROM routines ORDER BY time_hhmm")]
+
+    def delete_routine(self, name: str) -> bool:
+        cur = self._execute("DELETE FROM routines WHERE name=? COLLATE NOCASE", (name,))
+        return cur.rowcount > 0
+
+    def due_routines(self) -> list[dict]:
+        """Routines whose time matches the current minute and haven't run today."""
+        from datetime import datetime
+
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        hhmm = now.strftime("%H:%M")
+        weekday = now.strftime("%a").lower()[:3]
+        due = []
+        for r in self._query(
+            "SELECT * FROM routines WHERE enabled=1 AND time_hhmm=? "
+            "AND (last_run_date IS NULL OR last_run_date != ?)",
+            (hhmm, today),
+        ):
+            days = r["days"].lower()
+            if days == "daily" or weekday in days:
+                due.append(dict(r))
+        return due
+
+    def mark_routine_run(self, name: str) -> None:
+        from datetime import datetime
+
+        self._execute(
+            "UPDATE routines SET last_run_date=? WHERE name=?",
+            (datetime.now().strftime("%Y-%m-%d"), name),
+        )
+
+    # -- document chunks (RAG) ----------------------------------------------
+    def doc_file_mtime(self, path: str) -> float | None:
+        rows = self._query("SELECT mtime FROM doc_chunks WHERE path=? LIMIT 1", (path,))
+        return rows[0]["mtime"] if rows else None
+
+    def delete_doc_file(self, path: str) -> None:
+        ids = [r["id"] for r in self._query("SELECT id FROM doc_chunks WHERE path=?", (path,))]
+        self._execute("DELETE FROM doc_chunks WHERE path=?", (path,))
+        if self._vec_ready and ids:
+            self._execute(
+                f"DELETE FROM doc_vec WHERE rowid IN ({','.join('?' * len(ids))})", tuple(ids)
+            )
+
+    def add_doc_chunk(self, path: str, mtime: float, chunk_index: int, text: str) -> int:
+        cur = self._execute(
+            "INSERT INTO doc_chunks(path, mtime, chunk_index, text) VALUES(?,?,?,?)",
+            (path, mtime, chunk_index, text),
+        )
+        return int(cur.lastrowid)
+
+    def index_doc_chunk(self, chunk_id: int, vector: list[float]) -> None:
+        if not self._vec_ready:
+            return
+        self._execute(
+            "INSERT OR REPLACE INTO doc_vec(rowid, embedding) VALUES(?, ?)",
+            (chunk_id, struct.pack(f"{len(vector)}f", *vector)),
+        )
+
+    def doc_search(self, vector: list[float], limit: int = 6) -> list[dict]:
+        if not self._vec_ready:
+            return []
+        rows = self._query(
+            "SELECT d.path, d.chunk_index, d.text, v.distance "
+            "FROM (SELECT rowid, distance FROM doc_vec WHERE embedding MATCH ? "
+            "      ORDER BY distance LIMIT ?) v "
+            "JOIN doc_chunks d ON d.id = v.rowid",
+            (struct.pack(f"{len(vector)}f", *vector), limit),
+        )
+        return [dict(r) for r in rows]
+
+    def doc_stats(self) -> dict:
+        rows = self._query(
+            "SELECT COUNT(DISTINCT path) AS files, COUNT(*) AS chunks FROM doc_chunks"
+        )
+        return dict(rows[0]) if rows else {"files": 0, "chunks": 0}
 
     # -- agent memory -------------------------------------------------------
     def add_memory(
