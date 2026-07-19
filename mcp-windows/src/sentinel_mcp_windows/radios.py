@@ -45,9 +45,11 @@ if ($radios.Count -eq 0) { Write-Output 'NO_RADIOS'; exit 0 }
 foreach ($r in $radios) { Write-Output ("RADIO|{0}|{1}|{2}" -f $r.Kind, $r.State, $r.Name) }
 """
 
-# Set script template. {kind} and {state} are ONLY ever filled from the fixed
-# literal mappings below — never from user input.
-_SET_SCRIPT_TEMPLATE = _WINRT_PRELUDE + """\
+# Set script body. {kind} and {state} are ONLY ever filled from the fixed
+# literal mappings below — never from user input. This is .format()-ed on its
+# own and then prepended with the prelude at call time: the prelude's literal
+# PowerShell braces are single, so formatting it would raise KeyError.
+_SET_SCRIPT_BODY = """\
 $target = @($radios | Where-Object {{ $_.Kind -eq '{kind}' }})
 if ($target.Count -eq 0) {{ Write-Output 'NOT_FOUND'; exit 0 }}
 foreach ($r in $target) {{
@@ -86,7 +88,8 @@ def _set_radio(kind_key: str, enabled: bool) -> str:
     """Turn a radio kind on/off via the software radio switch and report the result."""
     kind = _RADIO_KINDS[kind_key]  # fixed literal, never user input
     state = _RADIO_STATES[enabled]
-    lines = _run_radio_script(_SET_SCRIPT_TEMPLATE.format(kind=kind, state=state))
+    script = _WINRT_PRELUDE + _SET_SCRIPT_BODY.format(kind=kind, state=state)
+    lines = _run_radio_script(script)
 
     for line in lines:
         if line.startswith("ACCESS_DENIED|"):
