@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.5.0"
+version = "0.6.0"
 description = "Sentinel AI desktop assistant"
 authors = ["Asim Aftab"]
 edition = "2021"
