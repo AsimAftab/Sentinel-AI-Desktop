@@ -53,6 +53,10 @@ _SET_SCRIPT_BODY = """\
 $target = @($radios | Where-Object {{ $_.Kind -eq '{kind}' }})
 if ($target.Count -eq 0) {{ Write-Output 'NOT_FOUND'; exit 0 }}
 foreach ($r in $target) {{
+  if ("$($r.State)" -eq '{state}') {{
+    Write-Output ("ALREADY|{{0}}|{{1}}" -f $r.State, $r.Name)
+    continue
+  }}
   $res = Await ($r.SetStateAsync('{state}')) ([Windows.Devices.Radios.RadioAccessStatus])
   Write-Output ("RESULT|{{0}}|{{1}}|{{2}}" -f $res, $r.State, $r.Name)
 }}
@@ -97,13 +101,17 @@ def _set_radio(kind_key: str, enabled: bool) -> str:
     if "NOT_FOUND" in lines:
         return f"No {kind} radio found on this system."
 
-    results = [line for line in lines if line.startswith("RESULT|")]
+    results = [line for line in lines if line.startswith(("RESULT|", "ALREADY|"))]
     if not results:
         return f"Error: unexpected output while setting {kind} radio."
 
     reports: list[str] = []
     for line in results:
         parts = line.split("|")
+        if parts[0] == "ALREADY":
+            state, name = parts[1], parts[2] if len(parts) > 2 else kind
+            reports.append(f"{name} is already {state} - no change needed.")
+            continue
         status, new_state = parts[1], parts[2]
         name = parts[3] if len(parts) > 3 else kind
         if status != "Allowed":
