@@ -224,7 +224,16 @@ def set_volume(level: int) -> str:
 def set_mute(muted: bool) -> str:
     """Mute (true) or unmute (false) the system master audio."""
     try:
-        _with_com(lambda: _get_endpoint_volume().SetMute(1 if muted else 0, None))
+        def _apply() -> bool:
+            vol = _get_endpoint_volume()
+            if bool(vol.GetMute()) == muted:
+                return False
+            vol.SetMute(1 if muted else 0, None)
+            return True
+
+        changed = _with_com(_apply)
+        if not changed:
+            return f"Audio is already {'muted' if muted else 'unmuted'} - no change needed."
         return "Audio muted." if muted else "Audio unmuted."
     except Exception as e:
         logger.exception("set_mute failed")
@@ -598,7 +607,7 @@ def empty_recycle_bin(confirm: bool = False) -> str:
 # --- Tool modules ---
 
 # Imported for their @mcp.tool() registrations (they import `mcp` from this module).
-from . import files, radios, workspaces  # noqa: E402,F401
+from . import files, night_light, radios, workspaces  # noqa: E402,F401
 
 
 def main() -> None:
