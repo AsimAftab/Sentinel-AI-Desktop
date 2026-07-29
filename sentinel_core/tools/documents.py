@@ -67,7 +67,8 @@ def _index_folder_blocking(folder: Path) -> str:
     files = [
         p
         for p in sorted(folder.rglob("*"))
-        if p.suffix.lower() in EXTENSIONS and p.is_file()
+        if p.suffix.lower() in EXTENSIONS
+        and p.is_file()
         and p.stat().st_size <= MAX_FILE_MB * 1024 * 1024
     ][:MAX_FILES]
     indexed = skipped = failed = 0
@@ -136,8 +137,7 @@ async def search_documents(question: str, limit: int = 6) -> str:
     if not results:
         return "Nothing relevant found in the indexed documents."
     parts = [
-        f"[{Path(r['path']).name} — chunk {r['chunk_index']}]\n{r['text'][:500]}"
-        for r in results
+        f"[{Path(r['path']).name} — chunk {r['chunk_index']}]\n{r['text'][:500]}" for r in results
     ]
     return "\n\n".join(parts)
 

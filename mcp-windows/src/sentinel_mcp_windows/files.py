@@ -148,8 +148,7 @@ def fs_list(path: str) -> str:
                 if entry.is_dir(follow_symlinks=False):
                     dirs.append(f"[dir]  {entry.name}  (modified {mtime})")
                 else:
-                    fils.append(f"[file] {entry.name}  {_fmt_size(st.st_size)}  "
-                                f"(modified {mtime})")
+                    fils.append(f"[file] {entry.name}  {_fmt_size(st.st_size)}  (modified {mtime})")
             except OSError:
                 fils.append(f"[?]    {entry.name}  (inaccessible)")
 
@@ -252,8 +251,7 @@ def fs_find(name_pattern: str, root: str = "", max_results: int = 25) -> str:
                 budget_hit = True
                 break
             dirnames[:] = [
-                d for d in dirnames
-                if d.lower() not in _PRUNE_DIRS and not d.startswith(".")
+                d for d in dirnames if d.lower() not in _PRUNE_DIRS and not d.startswith(".")
             ]
             for name in dirnames + filenames:
                 if matches(name):
@@ -325,13 +323,15 @@ def fs_info(path: str) -> str:
             kind = f"file ({target.suffix.lstrip('.') or 'no extension'})"
             size_line = f"Size: {_fmt_size(st.st_size)} ({st.st_size} bytes)"
         readonly = " read-only" if not (st.st_mode & stat.S_IWRITE) else ""
-        return "\n".join([
-            f"Path: {target}",
-            f"Type: {kind}{readonly}",
-            size_line,
-            f"Modified: {_fmt_mtime(st.st_mtime)}",
-            f"Created: {_fmt_mtime(st.st_ctime)}",
-        ])
+        return "\n".join(
+            [
+                f"Path: {target}",
+                f"Type: {kind}{readonly}",
+                size_line,
+                f"Modified: {_fmt_mtime(st.st_mtime)}",
+                f"Created: {_fmt_mtime(st.st_ctime)}",
+            ]
+        )
     except Exception as e:
         logger.exception("fs_info failed")
         return f"Error getting file info: {e}"
@@ -356,8 +356,9 @@ def fs_read_text(path: str, max_chars: int = 4000) -> str:
 
         text = target.read_text(encoding="utf-8", errors="replace")
         if len(text) > max_chars:
-            return (f"{text[:max_chars]}\n"
-                    f"…[truncated: showing {max_chars} of {len(text)} characters]")
+            return (
+                f"{text[:max_chars]}\n…[truncated: showing {max_chars} of {len(text)} characters]"
+            )
         return text if text else f"{target.name} is empty."
     except Exception as e:
         logger.exception("fs_read_text failed")

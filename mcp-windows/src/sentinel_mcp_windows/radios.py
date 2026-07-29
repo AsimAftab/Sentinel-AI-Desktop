@@ -40,10 +40,13 @@ $radios = Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) `
   ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
 """
 
-_GET_SCRIPT = _WINRT_PRELUDE + """\
+_GET_SCRIPT = (
+    _WINRT_PRELUDE
+    + """\
 if ($radios.Count -eq 0) { Write-Output 'NO_RADIOS'; exit 0 }
 foreach ($r in $radios) { Write-Output ("RADIO|{0}|{1}|{2}" -f $r.Kind, $r.State, $r.Name) }
 """
+)
 
 # Set script body. {kind} and {state} are ONLY ever filled from the fixed
 # literal mappings below — never from user input. This is .format()-ed on its
