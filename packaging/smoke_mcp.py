@@ -27,6 +27,8 @@ TIMEOUT_S = 60
 # breaks -- so each side module needs its own sentinel here.
 EXPECTED_TOOLS = {
     "get_volume": "server.py",
+    "audio_devices": "audio.py",
+    "audio_now_playing": "media.py",
     "fs_list": "files.py",
     "get_radios": "radios.py",
     "workspace_list": "workspaces.py",

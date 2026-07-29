@@ -1,20 +1,31 @@
 # sentinel-mcp-windows
 
-A standalone MCP (Model Context Protocol) server exposing **44 Windows control tools** over
-stdio. Built on proper Windows APIs: pycaw (audio), the WinRT Radio API (WiFi/Bluetooth),
-Win32 `BluetoothAPIs.dll`, screen-brightness-control, psutil, ctypes/user32, and PIL — no
-pyautogui, no hardcoded coordinates, no `shell=True`.
+A standalone MCP (Model Context Protocol) server exposing **52 Windows control tools** over
+stdio. Built on proper Windows APIs: pycaw + `IPolicyConfig` (audio), the WinRT Radio and
+MediaTransportControls APIs, Win32 `BluetoothAPIs.dll`, screen-brightness-control, psutil,
+ctypes/user32, and PIL — no pyautogui, no hardcoded coordinates, no `shell=True`.
 
 Requires Windows and Python 3.11+.
 
-## Tools (44)
+## Tools (52)
 
 **Audio**
 | Tool | Description |
 | --- | --- |
 | `get_volume` / `set_volume(level)` / `set_mute(muted)` | System master volume (0-100) and mute |
 | `adjust_volume(delta)` | Relative volume change (e.g. `-10`), clamped to 0-100 |
-| `media_control(action)` | Media keys: `play_pause`, `next`, `previous`, `stop` |
+| `media_control(action)` | Media keys: `play_pause`, `next`, `previous`, `stop` — blind fallback for players with no media session |
+| `audio_devices(kind)` | List active output/input devices, marking the default |
+| `audio_set_device(name, kind)` | Switch the default playback/recording device (`IPolicyConfig`) |
+| `audio_apps` | Apps currently using audio, with volume and mute state |
+| `audio_set_app_volume(app, level, muted)` | Per-app mixer — change one app without touching system volume |
+| `audio_mic` / `audio_set_mic(level, muted)` | Microphone level and mute |
+
+**Now playing** (WinRT `GlobalSystemMediaTransportControls` — every player, no API key)
+| Tool | Description |
+| --- | --- |
+| `audio_now_playing` | Title/artist/album/status for each media session (Spotify, YouTube Music in a browser, VLC, …) |
+| `audio_media(action, app)` | `play`/`pause`/`toggle`/`next`/`previous`/`stop` aimed at a named player |
 
 **Display**
 | Tool | Description |
