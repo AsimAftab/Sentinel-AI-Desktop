@@ -84,9 +84,11 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     ),
     MCPAgentDefinition(
         name="Files",
-        description="File navigation on this PC: list folders, show directory "
-        "trees, find files by name, open files or folders, read text files, "
-        "resolve Downloads/Documents/Desktop and other user folders.",
+        description="Files on this PC: list folders, show directory trees, find "
+        "files by name, open files or folders, read text files, resolve "
+        "Downloads/Documents/Desktop; and organise them — create folders, "
+        "rename, copy, move, and delete to the Recycle Bin. Deleting always "
+        "asks for confirmation first and is recoverable.",
         server_name="windows",
         command=_mcp_cmd,
         args=_mcp_args,
