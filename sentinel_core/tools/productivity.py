@@ -92,7 +92,7 @@ def list_routines() -> str:
         return "No routines set up."
     return "\n".join(
         f'"{r["name"]}" — {r["days"]} at {r["time_hhmm"]}'
-        f'{"" if r["enabled"] else " (disabled)"}: {r["prompt"][:80]}'
+        f"{'' if r['enabled'] else ' (disabled)'}: {r['prompt'][:80]}"
         for r in routines
     )
 

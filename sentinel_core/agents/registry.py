@@ -31,8 +31,10 @@ class AgentDefinition:
 class MCPAgentDefinition:
     """An agent whose tools come from an MCP server (spawned once, kept alive).
 
-    tool_prefixes: claim only tools whose names start with one of these;
-    None = catch-all for the server's tools no other agent claimed.
+    tool_prefixes: claim tools whose names start with one of these.
+    tool_names: claim these exact names — lets legacy tool names join a themed
+    agent without renaming them (get_volume -> Audio).
+    An agent with neither is the catch-all for whatever no other agent claimed.
     """
 
     name: str
@@ -41,6 +43,16 @@ class MCPAgentDefinition:
     command: str
     args: tuple[str, ...]
     tool_prefixes: tuple[str, ...] | None = None
+    tool_names: tuple[str, ...] = ()
+
+    @property
+    def is_catch_all(self) -> bool:
+        return not self.tool_prefixes and not self.tool_names
+
+    def claims(self, tool_name: str) -> bool:
+        if self.tool_prefixes and tool_name.startswith(self.tool_prefixes):
+            return True
+        return tool_name in self.tool_names
 
 
 def _windows_mcp_command() -> tuple[str, tuple[str, ...]]:
@@ -81,14 +93,52 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
         tool_prefixes=("fs_",),
     ),
     MCPAgentDefinition(
+        name="Audio",
+        description="Sound on this PC: current volume level, setting or "
+        "raising/lowering the volume, muting and unmuting, and media playback "
+        "keys (play/pause, next track, previous track, stop).",
+        server_name="windows",
+        command=_mcp_cmd,
+        args=_mcp_args,
+        tool_prefixes=("audio_",),
+        tool_names=("get_volume", "set_volume", "adjust_volume", "set_mute", "media_control"),
+    ),
+    MCPAgentDefinition(
+        name="Network",
+        description="Wireless connectivity: turn WiFi or Bluetooth on and off, "
+        "report radio states, list paired Bluetooth devices, and connect or "
+        "disconnect paired Bluetooth audio devices (headphones, speakers).",
+        server_name="windows",
+        command=_mcp_cmd,
+        args=_mcp_args,
+        tool_prefixes=("net_", "bluetooth_"),
+        tool_names=("get_radios", "set_wifi", "set_bluetooth"),
+    ),
+    MCPAgentDefinition(
+        name="Display",
+        description="Screen appearance: display brightness, dark or light "
+        "theme, night light (blue-light reduction), and desktop wallpaper.",
+        server_name="windows",
+        command=_mcp_cmd,
+        args=_mcp_args,
+        tool_prefixes=("disp_",),
+        tool_names=(
+            "get_brightness",
+            "set_brightness",
+            "get_theme",
+            "set_theme",
+            "get_night_light",
+            "set_night_light",
+            "set_wallpaper",
+        ),
+    ),
+    MCPAgentDefinition(
         name="System",
-        description="Windows system control: volume, brightness, night light, "
-        "dark/light theme, WiFi and Bluetooth toggles, connecting/disconnecting "
-        "paired Bluetooth devices (headphones, speakers), media playback, "
-        "launching and closing apps, minimizing/maximizing windows, "
-        "workspaces (named app groups like 'dev mode'), window focus, "
-        "clipboard, wallpaper, screenshots, system info, recycle bin, lock "
-        "screen and power actions.",
+        description="Windows apps and desktop: launch or close applications, "
+        "list and focus windows, minimize/maximize/restore them, workspaces "
+        "(named app groups like 'dev mode'), clipboard, screenshots, opening a "
+        "URL, system info (CPU, memory, disk, battery), recycle bin, lock "
+        "screen, and sleep/shutdown/restart.",
         server_name="windows",
         command=_mcp_cmd,
         args=_mcp_args,
@@ -183,8 +233,6 @@ AGENT_REGISTRY: list[AgentDefinition] = [
         "on-screen content, answer questions about it.",
         tools_module="sentinel_core.tools.screen",
     ),
-    # System & Productivity agents return in Phase 4 via the Sentinel Windows
-    # MCP server (replacing the legacy pyautogui-based system_tools).
 ]
 
 

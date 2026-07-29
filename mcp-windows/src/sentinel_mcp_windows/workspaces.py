@@ -168,8 +168,7 @@ def workspace_save(name: str, app_names: list[str], urls: list[str] = []) -> str
         workspaces[name] = {"apps": resolved, "urls": list(urls)}
         _save_workspaces(workspaces)
 
-        msg = (f"Saved workspace '{name}' with {len(resolved)} app(s) "
-               f"and {len(urls)} URL(s).")
+        msg = f"Saved workspace '{name}' with {len(resolved)} app(s) and {len(urls)} URL(s)."
         if unresolved:
             msg += " Unresolved: " + "; ".join(unresolved)
         return msg
