@@ -94,9 +94,13 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     ),
     MCPAgentDefinition(
         name="Audio",
-        description="Sound on this PC: current volume level, setting or "
-        "raising/lowering the volume, muting and unmuting, and media playback "
-        "keys (play/pause, next track, previous track, stop).",
+        description="Sound on this PC: system volume and mute; per-app volume "
+        "(turn down or mute just Chrome, a game, a call); switching the output "
+        "or input device (speakers, headphones, monitor); microphone level and "
+        "mute; and what is currently playing in ANY player — Spotify, YouTube "
+        "Music or any video in a browser, VLC — plus play/pause/next/previous "
+        "for it. Use this for 'what song is this' and for pausing or skipping "
+        "music, in preference to the Spotify-only Music agent.",
         server_name="windows",
         command=_mcp_cmd,
         args=_mcp_args,

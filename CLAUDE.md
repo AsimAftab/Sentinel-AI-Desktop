@@ -56,7 +56,7 @@ There is no formal test suite. Verify by driving the running service: `curl http
 
 ### MCP server (`mcp-windows/`)
 
-FastMCP stdio server, 44 tools (audio, display/theme/night-light, WinRT radio toggles — never adapter-disable —, paired-Bluetooth connect, apps/windows/workspaces, `fs_*` read-only file navigation, clipboard/wallpaper/recycle-bin/system). Rules: per-call COM init, list-args subprocess only (never `shell=True`), user text via stdin or `-EncodedCommand` (no interpolation), protected-process denylist for close_app, `confirm=True` gates on destructive actions, log to stderr only (stdout is the protocol). New tools go in a side module that does `from .server import mcp`, then get added to the side-effect import at the bottom of `server.py`. The core resolves the exe: `SENTINEL_MCP_WINDOWS_EXE` env → frozen sibling exe → `uv run --project mcp-windows` in dev.
+FastMCP stdio server, 52 tools (audio incl. per-app mixer + default-device switching via `IPolicyConfig` + mic, universal now-playing/transport via WinRT `GlobalSystemMediaTransportControls`, display/theme/night-light, WinRT radio toggles — never adapter-disable —, paired-Bluetooth connect, apps/windows/workspaces, `fs_*` read-only file navigation, clipboard/wallpaper/recycle-bin/system). Rules: per-call COM init, list-args subprocess only (never `shell=True`), user text via stdin or `-EncodedCommand` (no interpolation), protected-process denylist for close_app, `confirm=True` gates on destructive actions, log to stderr only (stdout is the protocol). New tools go in a side module that does `from .server import mcp`, then get added to the side-effect import at the bottom of `server.py`. The core resolves the exe: `SENTINEL_MCP_WINDOWS_EXE` env → frozen sibling exe → `uv run --project mcp-windows` in dev.
 
 **Freezing**: always target `mcp_entry.py`, never `server.py` — freezing `server.py` collapses the package and the exe dies on its relative imports, silently removing all Windows control from the build. `packaging/smoke_mcp.py <exe>` does a real MCP handshake + `tools/list` to catch exactly that; CI runs it after the freeze step.
 
@@ -66,6 +66,9 @@ FastMCP stdio server, 44 tools (audio, display/theme/night-light, WinRT radio to
 - **Frozen vs dev paths**: anything touching `sys.frozen`, `data_dir()`, or exe-relative lookups behaves differently in the packaged build; test with the frozen exe before shipping (`packaging/README.md`).
 - **CORS**: REST failures from the app while WebSocket works = missing origin in `sentinel_core/app.py`.
 - **Voice testing needs a human at the mic**; STT/TTS have no-mic smoke paths (synthesize a wav via pyttsx3 → `stt.transcribe`).
+- **pycaw returns dead audio sessions**: `GetAllSessions()` includes sessions whose process has exited, and touching `session.Process.name()` raises `psutil.NoSuchProcess`. Always iterate defensively (`audio.py:_sessions`). One app can also own several sessions — set them all or the change looks like a no-op.
+- **Muting the default mic deafens the wake word.** `audio_set_mic(muted=true)` means a spoken "unmute" can't be heard; it has to be undone from the app window. The tool says so in its reply.
+- **Media control has two layers**: `audio_media` (WinRT session, names its target, works for YouTube Music in a browser) and `media_control` (blind media-key injection at whatever holds media focus). Prefer the former; keep the latter for players that register no session.
 - Picovoice/Porcupine is dead (free tier ended 2026-06-30) — do not reintroduce it.
 
 ## Conventions
