@@ -24,34 +24,77 @@ _client_lock = threading.Lock()
 _client: Any = None
 
 
+def token_cache_path() -> str:
+    return str(data_dir() / "spotify_token.json")
+
+
+def build_auth_manager(open_browser: bool):
+    """SpotifyOAuth for the configured app, or None if keys are missing."""
+    from spotipy.oauth2 import SpotifyOAuth
+
+    client_id = get_secret("SPOTIPY_CLIENT_ID")
+    client_secret = get_secret("SPOTIPY_CLIENT_SECRET")
+    redirect_uri = get_secret("SPOTIPY_REDIRECT_URI")
+    if not (client_id and client_secret and redirect_uri):
+        return None
+    return SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope=SCOPES,
+        cache_path=token_cache_path(),
+        open_browser=open_browser,
+    )
+
+
+def is_authorized() -> bool:
+    """True if a usable cached token exists (refreshing it silently if needed)."""
+    try:
+        auth = build_auth_manager(open_browser=False)
+        if auth is None:
+            return False
+        token = auth.cache_handler.get_cached_token()
+        return bool(token) and bool(auth.validate_token(token))
+    except Exception:  # noqa: BLE001 — treat any auth problem as "not authorized"
+        return False
+
+
 def _spotify():
-    """Return a cached spotipy client (lazy — never created at import time)."""
+    """Return a cached spotipy client (lazy — never created at import time).
+
+    Never starts the OAuth ceremony: SpotifyOAuth would open a browser and then
+    block on the redirect for as long as it takes the user to sign in, which
+    inside a tool call means the agent times out and the supervisor retries,
+    opening a browser tab per attempt. Authorization is an explicit user action
+    via POST /connections/spotify/authorize instead.
+    """
     global _client
     with _client_lock:
         if _client is not None:
             return _client
         import spotipy
-        from spotipy.oauth2 import SpotifyOAuth
 
-        client_id = get_secret("SPOTIPY_CLIENT_ID")
-        client_secret = get_secret("SPOTIPY_CLIENT_SECRET")
-        redirect_uri = get_secret("SPOTIPY_REDIRECT_URI")
-        if not (client_id and client_secret and redirect_uri):
+        auth = build_auth_manager(open_browser=False)
+        if auth is None:
             raise ValueError(
                 "Spotify is not configured. Set SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, "
                 "and SPOTIPY_REDIRECT_URI (create an app at "
                 "https://developer.spotify.com/dashboard)."
             )
-        _client = spotipy.Spotify(
-            auth_manager=SpotifyOAuth(
-                client_id=client_id,
-                client_secret=client_secret,
-                redirect_uri=redirect_uri,
-                scope=SCOPES,
-                cache_path=str(data_dir() / "spotify_token.json"),
+        if not is_authorized():
+            raise ValueError(
+                "Spotify is configured but not authorized yet. Open Connections in "
+                "Sentinel and click Authorize to sign in once."
             )
-        )
+        _client = spotipy.Spotify(auth_manager=auth)
         return _client
+
+
+def reset_client() -> None:
+    """Drop the cached client so the next call picks up a new token."""
+    global _client
+    with _client_lock:
+        _client = None
 
 
 def _err(action: str, exc: Exception) -> str:

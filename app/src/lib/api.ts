@@ -27,6 +27,10 @@ export const api = {
   voiceStop: () => request<{ running: boolean }>("/voice/stop", { method: "POST" }),
   voiceStatus: () => request<{ running: boolean; state: string }>("/voice/status"),
 
+  getConnections: () => request<Connection[]>("/connections"),
+  authorizeSpotify: () =>
+    request<{ authorized: boolean }>("/connections/spotify/authorize", { method: "POST" }),
+
   listApps: () => request<InstalledApp[]>("/system/apps"),
   getWorkspaces: () => request<Record<string, Workspace>>("/workspaces"),
   saveWorkspace: (name: string, workspace: Workspace) =>
@@ -47,6 +51,22 @@ export const api = {
 export interface InstalledApp {
   name: string;
   app_id: string;
+}
+
+export interface Connection {
+  id: string;
+  label: string;
+  detail: string;
+  /** Secret names this connector needs. Empty for file-based auth (Google). */
+  keys: string[];
+  /** Credentials are present. */
+  configured: boolean;
+  /** Subset of keys still unset — drives the "needs X, Y" hint. */
+  missing: string[];
+  /** OAuth actually completed. Differs from `configured` for Spotify/Google. */
+  authorized: boolean;
+  /** Show an Authorize button (Spotify only for now). */
+  can_authorize: boolean;
 }
 
 export interface Workspace {
