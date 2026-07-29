@@ -28,12 +28,20 @@ logger = logging.getLogger(__name__)
 MAX_HOPS = 4
 AGENT_TIMEOUT_S = 45
 # Interactive/long-running agents legitimately exceed the default timeout.
+# Membership also raises recursion_limit and lifts the 3-tool-call budget in
+# _agent_system_prompt — the OS agents below need enumerate -> act -> verify
+# (list devices, switch, confirm), which does not fit in three calls.
 AGENT_TIMEOUTS = {
     "BrowserActions": 150,
     "Documents": 150,
     "Computer": 90,
     "MeetingNotes": 600,  # stopping a long recording transcribes many chunks
     "Coder": 360,
+    "System": 90,
+    "Audio": 60,
+    "Display": 60,
+    "Files": 60,
+    "Network": 90,  # bluetooth_connect polls the device for up to 10s
 }
 
 # Each ReAct agent is compiled once per candidate model; cap it so startup

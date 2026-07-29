@@ -52,8 +52,8 @@ class ChatService:
     async def _load_mcp_agents(self) -> list:
         """Spawn each registered MCP server once and split its tools by agent.
 
-        Agents with tool_prefixes claim matching tools; catch-all agents
-        (tool_prefixes=None) receive the server's remaining tools.
+        Agents with tool_prefixes/tool_names claim matching tools first;
+        catch-all agents then receive whatever is left on their server.
         """
         if self._mcp_agents is not None:
             return self._mcp_agents
@@ -89,14 +89,21 @@ class ChatService:
 
         claimed: dict[str, set[str]] = {}
         for definition in MCP_AGENT_REGISTRY:
-            if definition.tool_prefixes is None:
+            if definition.is_catch_all:
                 continue
-            tools = [
-                t
-                for t in server_tools[definition.server_name]
-                if t.name.startswith(definition.tool_prefixes)
-            ]
-            claimed.setdefault(definition.server_name, set()).update(t.name for t in tools)
+            tools = [t for t in server_tools[definition.server_name] if definition.claims(t.name)]
+            taken = claimed.setdefault(definition.server_name, set())
+            # Two agents claiming one tool would bind it twice and confuse routing.
+            overlap = taken.intersection(t.name for t in tools)
+            if overlap:
+                logger.warning(
+                    "MCP agent %s re-claims tools already taken on %s: %s",
+                    definition.name,
+                    definition.server_name,
+                    ", ".join(sorted(overlap)),
+                )
+                tools = [t for t in tools if t.name not in overlap]
+            taken.update(t.name for t in tools)
             if tools:
                 loaded.append(
                     (
@@ -107,7 +114,7 @@ class ChatService:
                 logger.info("MCP agent %s ready (%d tools)", definition.name, len(tools))
 
         for definition in MCP_AGENT_REGISTRY:
-            if definition.tool_prefixes is not None:
+            if not definition.is_catch_all:
                 continue
             taken = claimed.get(definition.server_name, set())
             tools = [t for t in server_tools[definition.server_name] if t.name not in taken]

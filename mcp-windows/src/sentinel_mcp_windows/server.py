@@ -162,9 +162,7 @@ def _enum_visible_windows() -> list[tuple[int, str]]:
     user32 = ctypes.windll.user32
     results: list[tuple[int, str]] = []
 
-    EnumWindowsProc = ctypes.WINFUNCTYPE(
-        ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p
-    )
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
 
     def callback(hwnd, _lparam):
         if user32.IsWindowVisible(hwnd):
@@ -187,6 +185,7 @@ def _enum_visible_windows() -> list[tuple[int, str]]:
 def get_volume() -> str:
     """Get the current system master volume level and mute state."""
     try:
+
         def read():
             vol = _get_endpoint_volume()
             level = round(vol.GetMasterVolumeLevelScalar() * 100)
@@ -224,6 +223,7 @@ def set_volume(level: int) -> str:
 def set_mute(muted: bool) -> str:
     """Mute (true) or unmute (false) the system master audio."""
     try:
+
         def _apply() -> bool:
             vol = _get_endpoint_volume()
             if bool(vol.GetMute()) == muted:
@@ -437,9 +437,7 @@ def focus_window(title_substring: str) -> str:
 
 
 @mcp.tool()
-def window_control(
-    title_substring: str, action: Literal["minimize", "maximize", "restore"]
-) -> str:
+def window_control(title_substring: str, action: Literal["minimize", "maximize", "restore"]) -> str:
     """Minimize, maximize, or restore the first visible window whose title contains
     the given substring (case-insensitive)."""
     SW_MINIMIZE, SW_MAXIMIZE = 6, 3
@@ -470,10 +468,8 @@ def system_info() -> str:
         disk = psutil.disk_usage("C:\\")
         lines = [
             f"CPU: {cpu}%",
-            f"RAM: {mem.used / 1024**3:.1f} / {mem.total / 1024**3:.1f} GB "
-            f"({mem.percent}%)",
-            f"Disk C:: {disk.used / 1024**3:.1f} / {disk.total / 1024**3:.1f} GB "
-            f"({disk.percent}%)",
+            f"RAM: {mem.used / 1024**3:.1f} / {mem.total / 1024**3:.1f} GB ({mem.percent}%)",
+            f"Disk C:: {disk.used / 1024**3:.1f} / {disk.total / 1024**3:.1f} GB ({disk.percent}%)",
         ]
         battery = psutil.sensors_battery()
         if battery is not None:
@@ -520,18 +516,14 @@ def lock_screen() -> str:
 
 
 @mcp.tool()
-def power_action(
-    action: Literal["sleep", "shutdown", "restart"], confirm: bool = False
-) -> str:
+def power_action(action: Literal["sleep", "shutdown", "restart"], confirm: bool = False) -> str:
     """Sleep, shut down, or restart the computer. Requires confirm=true to execute.
     Shutdown/restart have a 5-second delay."""
     try:
         if not confirm:
             return f"Pass confirm=true to actually {action}."
         if action == "sleep":
-            subprocess.run(
-                ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"], timeout=10
-            )
+            subprocess.run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"], timeout=10)
             return "Sleeping the computer."
         if action == "shutdown":
             subprocess.run(["shutdown", "/s", "/t", "5"], timeout=10)
@@ -644,9 +636,7 @@ def empty_recycle_bin(confirm: bool = False) -> str:
     try:
         if not confirm:
             return "Pass confirm=true to actually empty the Recycle Bin."
-        result = ctypes.windll.shell32.SHEmptyRecycleBinW(
-            None, None, SHERB_NOCONFIRMATION_NOSOUND
-        )
+        result = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, SHERB_NOCONFIRMATION_NOSOUND)
         if result == 0:
             return "Recycle Bin emptied."
         if result in ALREADY_EMPTY_RESULTS:

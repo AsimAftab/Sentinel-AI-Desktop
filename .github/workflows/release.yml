@@ -33,12 +33,21 @@ jobs:
         working-directory: packaging
         run: uv run --group core --group package pyinstaller sentinel-core.spec --noconfirm
 
+      # Freeze via mcp_entry.py (NOT server.py directly): pointing PyInstaller at
+      # server.py collapses the package and its `from . import ...` fails at runtime,
+      # which silently disables every Windows tool in the shipped build.
       - name: Freeze Windows MCP server
         working-directory: mcp-windows
         run: >
           uv run --with pyinstaller pyinstaller --onefile --name sentinel-mcp-windows
-          --console --collect-data screen_brightness_control
-          src/sentinel_mcp_windows/server.py --distpath dist --noconfirm
+          --console --paths src --collect-submodules sentinel_mcp_windows
+          --collect-data screen_brightness_control
+          mcp_entry.py --distpath dist --noconfirm
+
+      - name: Smoke-test frozen MCP server
+        working-directory: mcp-windows
+        shell: pwsh
+        run: python ../packaging/smoke_mcp.py dist/sentinel-mcp-windows.exe
 
       - name: Assemble sidecar resources
         shell: bash

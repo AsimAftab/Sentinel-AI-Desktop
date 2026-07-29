@@ -1,20 +1,27 @@
 # sentinel-mcp-windows
 
-A standalone MCP (Model Context Protocol) server exposing **35 Windows control tools** over
+A standalone MCP (Model Context Protocol) server exposing **44 Windows control tools** over
 stdio. Built on proper Windows APIs: pycaw (audio), the WinRT Radio API (WiFi/Bluetooth),
-screen-brightness-control, psutil, ctypes/user32, and PIL — no pyautogui, no hardcoded
-coordinates, no `shell=True`.
+Win32 `BluetoothAPIs.dll`, screen-brightness-control, psutil, ctypes/user32, and PIL — no
+pyautogui, no hardcoded coordinates, no `shell=True`.
 
 Requires Windows and Python 3.11+.
 
-## Tools (35)
+## Tools (44)
 
-**Audio & display**
+**Audio**
 | Tool | Description |
 | --- | --- |
 | `get_volume` / `set_volume(level)` / `set_mute(muted)` | System master volume (0-100) and mute |
-| `get_brightness` / `set_brightness(level)` | Display brightness (0-100) |
+| `adjust_volume(delta)` | Relative volume change (e.g. `-10`), clamped to 0-100 |
 | `media_control(action)` | Media keys: `play_pause`, `next`, `previous`, `stop` |
+
+**Display**
+| Tool | Description |
+| --- | --- |
+| `get_brightness` / `set_brightness(level)` | Display brightness (0-100) |
+| `get_theme` / `set_theme(mode)` | Windows dark/light theme |
+| `get_night_light` / `set_night_light(enabled)` | Night light (blue-light reduction) |
 | `set_wallpaper(image_path)` | Set the desktop wallpaper |
 
 **Radios** (WinRT `Windows.Devices.Radios` — the software switch; hardware is never disabled)
@@ -23,6 +30,12 @@ Requires Windows and Python 3.11+.
 | `get_radios` | List radios (WiFi, Bluetooth, …) and their on/off state |
 | `set_wifi(enabled)` / `set_bluetooth(enabled)` | Toggle the radio on/off |
 
+**Bluetooth devices** (Win32 `BluetoothAPIs.dll`; pairing new devices is out of scope)
+| Tool | Description |
+| --- | --- |
+| `bluetooth_devices` | List paired devices and their connected state |
+| `bluetooth_connect(name)` / `bluetooth_disconnect(name)` | Connect/disconnect a paired audio device (A2DP/HFP) |
+
 **Apps, windows & workspaces**
 | Tool | Description |
 | --- | --- |
@@ -30,6 +43,7 @@ Requires Windows and Python 3.11+.
 | `launch_app(name)` | Launch an app by name via `shell:AppsFolder` |
 | `close_app(name, force)` | Terminate processes by name (critical system processes protected) |
 | `list_windows` / `focus_window(title_substring)` | List visible windows; bring one to foreground |
+| `window_control(title_substring, action)` | `minimize` / `maximize` / `restore` a window |
 | `workspace_list` / `workspace_open(name)` / `workspace_save(...)` / `workspace_delete(name)` | Named app groups ("dev mode") stored in `%LOCALAPPDATA%\SentinelAI\workspaces.json` |
 
 **Files** (read-only + open; no delete/move/write)
@@ -88,3 +102,19 @@ sentinel-mcp-windows
 ```
 
 Point your MCP client's stdio transport at that command.
+
+## Freezing to a single exe
+
+Always point PyInstaller at `mcp_entry.py`, **never** at `src/sentinel_mcp_windows/server.py`.
+Freezing `server.py` directly collapses the package, so the `from . import ...` at the
+bottom of the module raises `ImportError: attempted relative import with no known parent
+package` and the exe dies on startup — taking every tool with it.
+
+```bash
+uv run --with pyinstaller pyinstaller --onefile --name sentinel-mcp-windows --console \
+  --paths src --collect-submodules sentinel_mcp_windows \
+  --collect-data screen_brightness_control mcp_entry.py --distpath dist --noconfirm
+
+# Verify the frozen exe actually serves tools (real MCP handshake + tools/list):
+python ../packaging/smoke_mcp.py dist/sentinel-mcp-windows.exe
+```
