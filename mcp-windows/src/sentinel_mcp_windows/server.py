@@ -653,6 +653,7 @@ def empty_recycle_bin(confirm: bool = False) -> str:
 from . import (  # noqa: E402,F401
     audio,
     bluetooth,
+    display,
     files,
     media,
     night_light,

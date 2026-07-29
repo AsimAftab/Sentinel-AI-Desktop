@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "get_volume": "server.py",
     "audio_devices": "audio.py",
     "audio_now_playing": "media.py",
+    "disp_list": "display.py",
     "fs_list": "files.py",
     "get_radios": "radios.py",
     "workspace_list": "workspaces.py",

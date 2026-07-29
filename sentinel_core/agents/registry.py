@@ -120,8 +120,10 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
     ),
     MCPAgentDefinition(
         name="Display",
-        description="Screen appearance: display brightness, dark or light "
-        "theme, night light (blue-light reduction), and desktop wallpaper.",
+        description="Screens and desktop: brightness, dark or light theme, "
+        "night light, wallpaper; listing monitors and switching between "
+        "duplicate/extend/second-screen-only; virtual desktops and show "
+        "desktop; screenshotting a single window by title.",
         server_name="windows",
         command=_mcp_cmd,
         args=_mcp_args,
@@ -140,9 +142,11 @@ MCP_AGENT_REGISTRY: list[MCPAgentDefinition] = [
         name="System",
         description="Windows apps and desktop: launch or close applications, "
         "list and focus windows, minimize/maximize/restore them, workspaces "
-        "(named app groups like 'dev mode'), clipboard, screenshots, opening a "
-        "URL, system info (CPU, memory, disk, battery), recycle bin, lock "
-        "screen, and sleep/shutdown/restart.",
+        "(named app groups like 'dev mode'), reading and setting the "
+        "clipboard, clipboard history (the Win+V list of recently copied "
+        "items), showing a desktop notification, screenshots, opening a URL, "
+        "system info (CPU, memory, disk, battery), recycle bin, lock screen, "
+        "and sleep/shutdown/restart.",
         server_name="windows",
         command=_mcp_cmd,
         args=_mcp_args,
