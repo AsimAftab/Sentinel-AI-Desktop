@@ -8,6 +8,7 @@ WebSocket protocol (JSON):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,7 +16,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from . import __version__
-from .config import PROVIDER_KEY_ENV, Settings, set_secret
+from .config import PROVIDER_KEY_ENV, Settings, get_secret, set_secret
 from .events import Event, EventType
 from .service import ChatService
 from .store import Store
@@ -204,19 +205,135 @@ async def reload_settings():
     return {"reloaded": True}
 
 
+# Non-LLM integrations, in the order the Connections view shows them. Single
+# source of truth: /connections renders from this and /secrets allows exactly
+# these keys, so the UI can never offer a field the API rejects.
+CONNECTORS: list[dict] = [
+    {
+        "id": "spotify",
+        "label": "Spotify",
+        "keys": ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET", "SPOTIPY_REDIRECT_URI"],
+        "detail": (
+            "Playback control and search. Create an app at developer.spotify.com, then "
+            "the browser opens once to authorize. Playback control needs Premium and the "
+            "Spotify app running; asking what is playing does not."
+        ),
+    },
+    {
+        "id": "google",
+        "label": "Google Calendar, Meet & Gmail",
+        "keys": [],
+        "detail": (
+            "File-based, not a key: put credentials.json in the Sentinel data folder, "
+            "then Google sign-in opens once and covers Calendar, Meet and Gmail."
+        ),
+    },
+    {
+        "id": "telegram",
+        "label": "Telegram",
+        "keys": ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"],
+        "detail": "Send messages to your phone. Create a bot with @BotFather to get a token.",
+    },
+    {
+        "id": "tavily",
+        "label": "Tavily",
+        "keys": ["TAVILY_API_KEY"],
+        "detail": "Web search behind the Browser agent — weather, news and lookups.",
+    },
+    {
+        "id": "elevenlabs",
+        "label": "ElevenLabs",
+        "keys": ["ELEVENLABS_API_KEY"],
+        "detail": "Natural voice output. Without it, Sentinel falls back to offline speech.",
+    },
+]
+
+_SECRET_ALLOWLIST = set(PROVIDER_KEY_ENV.values()) | {
+    key for connector in CONNECTORS for key in connector["keys"]
+}
+
+
+def _spotify_authorized() -> bool:
+    try:
+        from .tools.music import is_authorized
+
+        return is_authorized()
+    except Exception:  # noqa: BLE001 — spotipy missing must not break the page
+        return False
+
+
+@app.get("/connections")
+async def get_connections():
+    """Per-connector configuration status. Never returns secret values.
+
+    `configured` means credentials are present; `authorized` means the OAuth
+    ceremony has actually been completed. The two differ for Spotify and
+    Google, and conflating them is why a "connected" Spotify could still fail.
+    """
+    from .config import data_dir
+
+    out = []
+    for connector in CONNECTORS:
+        keys = connector["keys"]
+        missing: list[str] = []
+        if connector["id"] == "google":
+            # Google authorizes from a credentials.json file, not from keys.
+            configured = (data_dir() / "credentials.json").exists()
+            authorized = configured and (data_dir() / "google_token.json").exists()
+        else:
+            missing = [k for k in keys if not get_secret(k)]
+            configured = bool(keys) and not missing
+            authorized = _spotify_authorized() if connector["id"] == "spotify" else configured
+        out.append(
+            {
+                "id": connector["id"],
+                "label": connector["label"],
+                "detail": connector["detail"],
+                "keys": keys,
+                "configured": configured,
+                "missing": missing,
+                "authorized": authorized,
+                # Only Spotify can be authorized from the UI today; Google's
+                # ceremony runs on first use of a Calendar/Gmail tool.
+                "can_authorize": connector["id"] == "spotify" and configured and not authorized,
+            }
+        )
+    return out
+
+
+@app.post("/connections/spotify/authorize")
+async def authorize_spotify():
+    """Run the Spotify OAuth ceremony deliberately, from a user click.
+
+    Kept out of the agent path: spotipy opens a browser and blocks on the
+    redirect until the user signs in, which inside a tool call just times the
+    agent out and gets retried, opening a browser tab each time.
+    """
+    from .tools.music import build_auth_manager, reset_client
+
+    auth = build_auth_manager(open_browser=True)
+    if auth is None:
+        raise HTTPException(400, "Set the Spotify client id, secret and redirect URI first.")
+
+    def _run() -> None:
+        # Blocks on a local callback server until the user finishes signing in.
+        auth.get_access_token(check_cache=False)
+
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_run), timeout=180)
+    except asyncio.TimeoutError:
+        raise HTTPException(408, "Timed out waiting for Spotify sign-in.") from None
+    except Exception as exc:  # noqa: BLE001 — surface the reason to the UI
+        raise HTTPException(400, f"Spotify authorization failed: {exc}") from exc
+
+    reset_client()
+    await app.state.chat.reload(load_settings(app.state.store))
+    return {"authorized": True}
+
+
 @app.post("/secrets")
 async def put_secret(update: SecretUpdate):
-    allowed = set(PROVIDER_KEY_ENV.values()) | {
-        "TAVILY_API_KEY",
-        "ELEVENLABS_API_KEY",
-        "PORCUPINE_KEY",
-        "SPOTIPY_CLIENT_ID",
-        "SPOTIPY_CLIENT_SECRET",
-        "SPOTIPY_REDIRECT_URI",
-        "TELEGRAM_BOT_TOKEN",
-        "TELEGRAM_CHAT_ID",
-    }
-    if update.name not in allowed:
+    if update.name not in _SECRET_ALLOWLIST:
         raise HTTPException(400, f"Unknown secret name: {update.name}")
     set_secret(update.name, update.value)
     await app.state.chat.reload(load_settings(app.state.store))
