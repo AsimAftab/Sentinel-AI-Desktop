@@ -1,6 +1,17 @@
-"""File navigation tools (read-only + open). No delete/move/write tools.
+"""File navigation and organisation tools.
 
 All tool names start with fs_. Paths are expanded (~, %VARS%) before use.
+
+Read tools are unrestricted. The write tools (new folder, rename, copy, move,
+delete) are deliberately fenced, because an LLM acting on a misheard path is a
+real failure mode:
+- every target must resolve inside the user's profile (_guard_writable),
+- system and program directories are refused outright,
+- nothing is ever overwritten unless the caller explicitly says so,
+- delete means the Recycle Bin (SHFileOperationW + FOF_ALLOWUNDO), never
+  os.remove, so anything removed is recoverable, and it needs confirm=True,
+- every success string reports the resolved absolute path, so the model cannot
+  quietly misreport what it touched.
 """
 
 from __future__ import annotations
@@ -49,6 +60,74 @@ _PRUNE_DIRS = {
 }
 
 _DOWNLOADS_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
+
+# Roots that write tools refuse even if they somehow sit under the profile.
+_PROTECTED_ROOTS = (
+    "c:/windows",
+    "c:/program files",
+    "c:/program files (x86)",
+    "c:/programdata",
+)
+
+# SHFileOperationW
+_FO_DELETE = 0x0003
+_FOF_ALLOWUNDO = 0x0040  # recycle instead of destroying
+_FOF_NOCONFIRMATION = 0x0010
+_FOF_SILENT = 0x0004
+_FOF_NOERRORUI = 0x0400
+
+
+def _norm(path: Path) -> str:
+    return str(path).replace("\\", "/").rstrip("/").lower()
+
+
+def _guard_writable(path: Path, what: str) -> str:
+    """Empty string if the path may be modified, else the reason it may not."""
+    target = _norm(path)
+    for root in _PROTECTED_ROOTS:
+        if target == root or target.startswith(root + "/"):
+            return f"Refusing to {what} inside a Windows system folder: {path}"
+
+    home = _norm(Path.home())
+    if not (target == home or target.startswith(home + "/")):
+        return (
+            f"Refusing to {what} outside your user folder ({Path.home()}): {path}. "
+            "Move or copy it under your profile instead."
+        )
+    if target == home:
+        return f"Refusing to {what} your entire user folder."
+    return ""
+
+
+def _recycle(path: Path) -> str:
+    """Send a file or folder to the Recycle Bin. Returns "" on success."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_uint16),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", wintypes.LPVOID),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    op = _SHFILEOPSTRUCTW()
+    op.wFunc = _FO_DELETE
+    # pFrom is a double-NUL-terminated list of paths.
+    op.pFrom = str(path) + "\0\0"
+    op.fFlags = _FOF_ALLOWUNDO | _FOF_NOCONFIRMATION | _FOF_SILENT | _FOF_NOERRORUI
+
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if result != 0:
+        return f"Windows refused the delete (code {result})."
+    if op.fAnyOperationsAborted:
+        return "The delete was aborted."
+    return ""
 
 
 def _expand(path: str) -> Path:
@@ -363,3 +442,162 @@ def fs_read_text(path: str, max_chars: int = 4000) -> str:
     except Exception as e:
         logger.exception("fs_read_text failed")
         return f"Error reading file: {e}"
+
+
+# --- Write tools (see the module docstring for the safety contract) ---
+
+
+@mcp.tool()
+def fs_new_folder(path: str) -> str:
+    """Create a folder, including any missing parent folders."""
+    try:
+        target = _expand(path)
+        blocked = _guard_writable(target, "create a folder")
+        if blocked:
+            return blocked
+        if target.exists():
+            return f"{target} already exists."
+        target.mkdir(parents=True)
+        return f"Created folder {target}"
+    except Exception as e:
+        logger.exception("fs_new_folder failed")
+        return f"Error creating folder: {e}"
+
+
+@mcp.tool()
+def fs_rename(path: str, new_name: str) -> str:
+    """Rename a file or folder in place. new_name is a name, not a path."""
+    try:
+        source = _expand(path)
+        blocked = _guard_writable(source, "rename")
+        if blocked:
+            return blocked
+        if not source.exists():
+            return f"Not found: {source}"
+
+        clean = new_name.strip().strip('"')
+        if not clean:
+            return "Error: a new name is required."
+        # A name, not a path: refuse separators so this cannot become a move.
+        if any(sep in clean for sep in ("/", "\\")) or clean in (".", ".."):
+            return "Error: new_name must be a file name, not a path. Use fs_move to relocate."
+
+        destination = source.with_name(clean)
+        if destination.exists():
+            return f"{destination.name} already exists in that folder."
+        source.rename(destination)
+        return f"Renamed to {destination}"
+    except Exception as e:
+        logger.exception("fs_rename failed")
+        return f"Error renaming: {e}"
+
+
+def _resolve_destination(source: Path, destination: str) -> Path:
+    """A destination folder means "put it inside"; otherwise it is the new path."""
+    target = _expand(destination)
+    if target.is_dir():
+        return target / source.name
+    return target
+
+
+@mcp.tool()
+def fs_move(source: str, destination: str, overwrite: bool = False) -> str:
+    """Move a file or folder. destination may be a folder or a full new path.
+
+    Refuses to replace an existing file unless overwrite is true.
+    """
+    try:
+        src = _expand(source)
+        if not src.exists():
+            return f"Not found: {src}"
+        dst = _resolve_destination(src, destination)
+
+        for path, what in ((src, "move"), (dst, "move into")):
+            blocked = _guard_writable(path, what)
+            if blocked:
+                return blocked
+        if _norm(dst) == _norm(src):
+            return f"{src} is already there - nothing to do."
+        if dst.exists() and not overwrite:
+            return f"{dst} already exists. Pass overwrite=true to replace it."
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            recycle_error = _recycle(dst)
+            if recycle_error:
+                return f"Could not replace {dst}: {recycle_error}"
+        import shutil
+
+        shutil.move(str(src), str(dst))
+        return f"Moved to {dst}"
+    except Exception as e:
+        logger.exception("fs_move failed")
+        return f"Error moving: {e}"
+
+
+@mcp.tool()
+def fs_copy(source: str, destination: str, overwrite: bool = False) -> str:
+    """Copy a file or folder. destination may be a folder or a full new path.
+
+    Refuses to replace an existing file unless overwrite is true.
+    """
+    try:
+        src = _expand(source)
+        if not src.exists():
+            return f"Not found: {src}"
+        dst = _resolve_destination(src, destination)
+
+        blocked = _guard_writable(dst, "copy into")
+        if blocked:
+            return blocked
+        if _norm(dst) == _norm(src):
+            return "Source and destination are the same file."
+        if dst.exists() and not overwrite:
+            return f"{dst} already exists. Pass overwrite=true to replace it."
+
+        import shutil
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            if _norm(dst).startswith(_norm(src) + "/"):
+                return "Cannot copy a folder into itself."
+            shutil.copytree(src, dst, dirs_exist_ok=overwrite)
+        else:
+            shutil.copy2(src, dst)
+        return f"Copied to {dst}"
+    except Exception as e:
+        logger.exception("fs_copy failed")
+        return f"Error copying: {e}"
+
+
+@mcp.tool()
+def fs_delete(path: str, confirm: bool = False) -> str:
+    """Send a file or folder to the Recycle Bin (recoverable, never permanent).
+
+    Refuses unless confirm=true. Tell the user what will be deleted and get a
+    clear yes before passing confirm.
+    """
+    try:
+        target = _expand(path)
+        blocked = _guard_writable(target, "delete")
+        if blocked:
+            return blocked
+        if not target.exists():
+            return f"Not found: {target}"
+
+        if target.is_dir():
+            count = sum(1 for _ in target.rglob("*"))
+            what = f"folder {target} and the {count} item(s) inside it"
+        else:
+            what = f"file {target} ({_fmt_size(target.stat().st_size)})"
+
+        if not confirm:
+            return f"About to delete {what}. Pass confirm=true to move it to the Recycle Bin."
+
+        failure = _recycle(target)
+        if failure:
+            return failure
+        return f"Moved {target} to the Recycle Bin. It can be restored from there."
+    except Exception as e:
+        logger.exception("fs_delete failed")
+        return f"Error deleting: {e}"

@@ -1,13 +1,13 @@
 # sentinel-mcp-windows
 
-A standalone MCP (Model Context Protocol) server exposing **58 Windows control tools** over
+A standalone MCP (Model Context Protocol) server exposing **63 Windows control tools** over
 stdio. Built on proper Windows APIs: pycaw + `IPolicyConfig` (audio), the WinRT Radio and
 MediaTransportControls APIs, Win32 `BluetoothAPIs.dll`, screen-brightness-control, psutil,
 ctypes/user32, and PIL — no pyautogui, no hardcoded coordinates, no `shell=True`.
 
 Requires Windows and Python 3.11+.
 
-## Tools (58)
+## Tools (63)
 
 **Audio**
 | Tool | Description |
@@ -63,7 +63,7 @@ Requires Windows and Python 3.11+.
 | `window_control(title_substring, action)` | `minimize` / `maximize` / `restore` a window |
 | `workspace_list` / `workspace_open(name)` / `workspace_save(...)` / `workspace_delete(name)` | Named app groups ("dev mode") stored in `%LOCALAPPDATA%\SentinelAI\workspaces.json` |
 
-**Files** (read-only + open; no delete/move/write)
+**Files — reading**
 | Tool | Description |
 | --- | --- |
 | `fs_known_folders` | Resolve Desktop/Documents/Downloads/Pictures/Music/Videos |
@@ -71,6 +71,18 @@ Requires Windows and Python 3.11+.
 | `fs_find(name_pattern, root, max_results)` | Bounded filename search with noise-dir pruning |
 | `fs_open(path)` / `fs_open_folder(path)` | Open with default app / in Explorer |
 | `fs_info(path)` / `fs_read_text(path, max_chars)` | File metadata / text preview |
+
+**Files — organising.** Every target must resolve inside the user profile; system and program
+directories are refused; nothing is overwritten without an explicit flag; and delete means the
+Recycle Bin, never `os.remove`.
+
+| Tool | Description |
+| --- | --- |
+| `fs_new_folder(path)` | Create a folder and any missing parents |
+| `fs_rename(path, new_name)` | Rename in place — refuses path separators so it can't become a move |
+| `fs_copy(source, destination, overwrite)` | Copy a file or folder; refuses to replace unless `overwrite=true` |
+| `fs_move(source, destination, overwrite)` | Move a file or folder; same overwrite rule |
+| `fs_delete(path, confirm)` | `SHFileOperationW` + `FOF_ALLOWUNDO` → Recycle Bin, recoverable; refuses unless `confirm=true` |
 
 **System**
 | Tool | Description |
