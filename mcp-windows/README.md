@@ -1,13 +1,13 @@
 # sentinel-mcp-windows
 
-A standalone MCP (Model Context Protocol) server exposing **52 Windows control tools** over
+A standalone MCP (Model Context Protocol) server exposing **58 Windows control tools** over
 stdio. Built on proper Windows APIs: pycaw + `IPolicyConfig` (audio), the WinRT Radio and
 MediaTransportControls APIs, Win32 `BluetoothAPIs.dll`, screen-brightness-control, psutil,
 ctypes/user32, and PIL — no pyautogui, no hardcoded coordinates, no `shell=True`.
 
 Requires Windows and Python 3.11+.
 
-## Tools (52)
+## Tools (58)
 
 **Audio**
 | Tool | Description |
@@ -27,13 +27,19 @@ Requires Windows and Python 3.11+.
 | `audio_now_playing` | Title/artist/album/status for each media session (Spotify, YouTube Music in a browser, VLC, …) |
 | `audio_media(action, app)` | `play`/`pause`/`toggle`/`next`/`previous`/`stop` aimed at a named player |
 
-**Display**
+**Display & desktop**
 | Tool | Description |
 | --- | --- |
 | `get_brightness` / `set_brightness(level)` | Display brightness (0-100) |
 | `get_theme` / `set_theme(mode)` | Windows dark/light theme |
 | `get_night_light` / `set_night_light(enabled)` | Night light (blue-light reduction) |
 | `set_wallpaper(image_path)` | Set the desktop wallpaper |
+| `disp_list` | Monitors with resolution, refresh rate and position |
+| `disp_mode(mode)` | Win+P modes via `DisplaySwitch.exe`; refuses second-screen modes when only one monitor is attached |
+| `disp_virtual_desktop(action)` | next/previous/new/close desktop, or show desktop |
+| `disp_screenshot_window(title_substring)` | Capture one window instead of the whole screen |
+| `notify(title, message)` | Windows toast notification |
+| `clipboard_history(limit)` | Recent Win+V entries — returns whatever was copied, so treat as sensitive |
 
 **Radios** (WinRT `Windows.Devices.Radios` — the software switch; hardware is never disabled)
 | Tool | Description |
